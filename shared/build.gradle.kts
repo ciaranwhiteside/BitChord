@@ -19,6 +19,15 @@ kotlin {
         }
     }
 
+    // The web player: commonMain compiled to an ES module it imports (web/shared-kotlin).
+    // nodejs(), not browser(): the module only needs compiling, and its tests run in Node.
+    js {
+        nodejs()
+        useEsModules()
+        binaries.library()
+        generateTypeScriptDefinitions()
+    }
+
     // Android and desktop are both JVM, but the default hierarchy gives them no source set in
     // common.
     applyDefaultHierarchyTemplate()
@@ -72,4 +81,38 @@ android {
     defaultConfig {
         minSdk = 26
     }
+}
+
+/*
+ * The web player's copy of commonMain, as JavaScript: `./gradlew :shared:exportWeb` writes it to
+ * web/shared-kotlin/dist, which is committed so the site builds without a JDK (Cloudflare Pages
+ * has Node only). CI regenerates it whenever shared/ changes (.github/workflows/web.yml).
+ */
+tasks.register<Sync>("exportWeb") {
+    group = "build"
+    description = "Compiles commonMain to JavaScript for the web player (web/shared-kotlin/dist)."
+    val compile = tasks.named("compileProductionLibraryKotlinJs")
+    dependsOn(compile, "jsProductionLibraryCompileSync")
+    from(layout.buildDirectory.dir("compileSync/js/main/productionLibrary/kotlin")) {
+        include("*.mjs", "*.d.mts")
+        // The .map files aren't shipped, so nothing may point at them.
+        filter { line -> if (line.startsWith("//# sourceMappingURL=")) "" else line }
+        // Kotlin/JS lists a class's interfaces in no fixed order from one run to the next. The list
+        // only answers `is` checks, so sorting it changes nothing and keeps the output identical
+        // between runs, which CI's "is it up to date" comparison relies on.
+        filter { line ->
+            if (!line.startsWith("initMetadataFor")) line
+            else line.replace(Regex("""\[([A-Za-z_$][\w$]*(?:, [A-Za-z_$][\w$]*)+)]""")) { m ->
+                "[" + m.groupValues[1].split(", ").sorted().joinToString(", ") + "]"
+            }
+        }
+    }
+    into(rootProject.layout.projectDirectory.dir("web/shared-kotlin/dist"))
+}
+
+// The JS target uses the machine's Node.js (the web build needs one anyway) rather than
+// downloading its own: settings.gradle.kts rejects the download repository Kotlin would add
+// (FAIL_ON_PROJECT_REPOS). Android builds never run JS tasks, so they don't need Node.
+rootProject.plugins.withType<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsPlugin> {
+    rootProject.the<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec>().download.set(false)
 }
