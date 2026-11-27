@@ -12,8 +12,9 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager, Runtime, State, Window, Wry};
 use windows::Foundation::{TimeSpan, TypedEventHandler, Uri};
 use windows::Media::{
-    MediaPlaybackStatus, MediaPlaybackType, SystemMediaTransportControls, SystemMediaTransportControlsButton,
-    SystemMediaTransportControlsButtonPressedEventArgs, SystemMediaTransportControlsTimelineProperties,
+    MediaPlaybackStatus, MediaPlaybackType, PlaybackPositionChangeRequestedEventArgs, SystemMediaTransportControls,
+    SystemMediaTransportControlsButton, SystemMediaTransportControlsButtonPressedEventArgs,
+    SystemMediaTransportControlsTimelineProperties,
 };
 use windows::Storage::Streams::RandomAccessStreamReference;
 use windows::Win32::Foundation::HWND;
@@ -57,8 +58,13 @@ pub struct MediaState {
 }
 
 pub fn dispatch_action<R: Runtime>(app: &AppHandle<R>, action: &str) {
+    run_action(app, &format!("{action:?}"));
+}
+
+/// Runs the player's handler: `args` is the JS argument list for __bitchordMediaAction.
+fn run_action<R: Runtime>(app: &AppHandle<R>, args: &str) {
     if let Some(main) = app.get_webview_window("main") {
-        let _ = main.eval(format!("window.__bitchordMediaAction?.({action:?})"));
+        let _ = main.eval(format!("window.__bitchordMediaAction?.({args})"));
     }
 }
 
@@ -82,6 +88,17 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, window: &Window<R>) -> Result<()> {
         dispatch_action(&app_for_buttons, action);
         Ok(())
     }))?;
+
+    // A timeline that can scrub (a controller app, a widget) asks for a position: the player's seekto.
+    let app_for_seek = app.clone();
+    smtc.PlaybackPositionChangeRequested(&TypedEventHandler::new(
+        move |_, args: Ref<PlaybackPositionChangeRequestedEventArgs>| {
+            let Some(args) = args.as_ref() else { return Ok(()) };
+            let secs = args.RequestedPlaybackPosition()?.Duration as f64 / 10_000_000.0;
+            run_action(&app_for_seek, &format!("'seekto', {{ seekTime: {secs} }}"));
+            Ok(())
+        },
+    ))?;
 
     app.manage(Controls {
         smtc,
@@ -125,20 +142,17 @@ fn update(controls: &Controls, state: &MediaState) -> Result<()> {
         _ => MediaPlaybackStatus::Closed,
     })?;
 
-    if let Some(duration) = state.duration.filter(|d| d.is_finite() && *d > 0.0) {
-        let pos = state
-            .position
-            .filter(|p| p.is_finite() && *p >= 0.0)
-            .unwrap_or(0.0)
-            .min(duration);
-        let timeline = SystemMediaTransportControlsTimelineProperties::new()?;
-        timeline.SetStartTime(secs_to_timespan(0.0))?;
-        timeline.SetMinSeekTime(secs_to_timespan(0.0))?;
-        timeline.SetEndTime(secs_to_timespan(duration))?;
-        timeline.SetMaxSeekTime(secs_to_timespan(duration))?;
-        timeline.SetPosition(secs_to_timespan(pos))?;
-        let _ = smtc.UpdateTimelineProperties(&timeline);
-    }
+    // No duration yet (a track still loading): an empty timeline, not the last track's.
+    let duration = state.duration.filter(|d| d.is_finite() && *d > 0.0).unwrap_or(0.0);
+    let position = state.position.filter(|p| p.is_finite()).unwrap_or(0.0).clamp(0.0, duration);
+    let timeline = SystemMediaTransportControlsTimelineProperties::new()?;
+    timeline.SetStartTime(secs_to_timespan(0.0))?;
+    timeline.SetMinSeekTime(secs_to_timespan(0.0))?;
+    timeline.SetEndTime(secs_to_timespan(duration))?;
+    let seekable = state.actions.iter().any(|a| a == "seekto");
+    timeline.SetMaxSeekTime(secs_to_timespan(if seekable { duration } else { 0.0 }))?;
+    timeline.SetPosition(secs_to_timespan(position))?;
+    smtc.UpdateTimelineProperties(&timeline)?;
 
     let display = smtc.DisplayUpdater()?;
     display.SetType(MediaPlaybackType::Music)?;

@@ -7,8 +7,8 @@
   if (!session) return;
   const proto = Object.getPrototypeOf(session);
   const handlers = new Map();
-  let positionState = null;
-  let lastReportedPos = null;
+  // The last setPositionState, stamped with when it was given and whether the player was playing then.
+  let position = null;
 
   const largest = (artwork) =>
     [...(artwork ?? [])].sort((a, b) => size(b) - size(a))[0]?.src ?? null;
@@ -22,6 +22,18 @@
     }
   };
 
+  // The player only sets its position on a seek or a new duration or rate, so a pause or a
+  // resume in between reads it from there: where the track is now, not where it was last set.
+  const current = () => {
+    if (!position) return null;
+    const ran = position.playing ? ((performance.now() - position.at) / 1000) * position.playbackRate : 0;
+    return { ...position, position: Math.min(position.duration, position.position + ran) };
+  };
+  const restamp = (playing) => {
+    const now = current();
+    position = now && { ...now, at: performance.now(), playing };
+  };
+
   let queued = false;
   const report = () => {
     if (queued) return;
@@ -30,9 +42,7 @@
       queued = false;
       const meta = session.metadata;
       const artwork = largest(meta?.artwork);
-      if (positionState) {
-        lastReportedPos = { ...positionState, at: Date.now() };
-      }
+      const now = current();
       window.__TAURI_INTERNALS__
         ?.invoke('media_session', {
           state: {
@@ -42,9 +52,9 @@
             artwork: artwork && httpUrl(artwork),
             playback: session.playbackState,
             actions: [...handlers.keys()],
-            duration: positionState?.duration ?? null,
-            position: positionState?.position ?? null,
-            playbackRate: positionState?.playbackRate ?? null,
+            duration: now?.duration ?? null,
+            position: now?.position ?? null,
+            playbackRate: now?.playbackRate ?? null,
           },
         })
         .catch(() => {});
@@ -59,6 +69,10 @@
         return native.get.call(this);
       },
       set(value) {
+        // A new track's position is unknown until the player sets it; the last one's would be wrong.
+        // The player sets metadata twice per track (a hint, then the resolved stream), so by title.
+        if (key === 'playbackState') restamp(value === 'playing');
+        else if (value?.title !== session.metadata?.title) position = null;
         native.set.call(this, value);
         report();
       },
@@ -73,33 +87,23 @@
     return setActionHandler.call(this, action, handler);
   };
 
-  if (typeof proto.setPositionState === 'function') {
-    const setPositionState = proto.setPositionState;
-    session.setPositionState = function (state) {
-      const result = setPositionState.call(this, state);
-      if (!state || !Number.isFinite(state.duration) || state.duration <= 0) {
-        positionState = null;
-      } else {
-        const next = {
+  const setPositionState = proto.setPositionState;
+  session.setPositionState = function (state) {
+    const result = setPositionState.call(this, state);
+    position = Number.isFinite(state?.duration) && state.duration > 0
+      ? {
           duration: state.duration,
           position: Number.isFinite(state.position) ? state.position : 0,
           playbackRate: Number.isFinite(state.playbackRate) && state.playbackRate > 0 ? state.playbackRate : 1,
-        };
-        positionState = next;
-        const shouldReport =
-          !lastReportedPos ||
-          Math.abs(next.duration - lastReportedPos.duration) > 1 ||
-          Math.abs(next.playbackRate - lastReportedPos.playbackRate) > 0.01 ||
-          Math.abs(
-            next.position -
-              (lastReportedPos.position + ((Date.now() - lastReportedPos.at) / 1000) * lastReportedPos.playbackRate),
-          ) > 2;
-        if (shouldReport) report();
-      }
-      return result;
-    };
-  }
+          at: performance.now(),
+          playing: session.playbackState === 'playing',
+        }
+      : null;
+    report();
+    return result;
+  };
 
-  // media_session.rs and tray.rs call this for Windows' buttons: play, pause, nexttrack, previoustrack, stop.
-  window.__bitchordMediaAction = (action) => handlers.get(action)?.({ action });
+  // media_session.rs and tray.rs call this for Windows' buttons: play, pause, nexttrack,
+  // previoustrack, stop, and seekto (with seekTime) from a timeline.
+  window.__bitchordMediaAction = (action, details) => handlers.get(action)?.({ ...details, action });
 })();
