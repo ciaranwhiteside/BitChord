@@ -1,20 +1,22 @@
 //! Windows notification-area tray icon with playback controls and background
 //! hide/show. Hiding the window to the tray puts WebView2 into the same low-memory
 //! hidden state as minimising (`memory::set_background`), so music keeps playing
-//! at idle CPU and low RAM without occupying the taskbar.
+//! at idle CPU and low RAM without occupying the taskbar. "Show on Discord" is
+//! where Discord presence (`discord_rpc`) is turned on; it starts off.
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime, Wry};
 
 use crate::media_session::{self, MediaState};
-use crate::memory;
+use crate::{discord_rpc, memory};
 
 const TRAY_ID: &str = "bitchord-tray";
 const ID_NOW_PLAYING: &str = "tray_now_playing";
 const ID_PLAY_PAUSE: &str = "tray_play_pause";
 const ID_NEXT: &str = "tray_next";
 const ID_PREVIOUS: &str = "tray_previous";
+const ID_DISCORD: &str = "tray_discord";
 const ID_TOGGLE_WINDOW: &str = "tray_toggle_window";
 const ID_QUIT: &str = "tray_quit";
 
@@ -31,19 +33,28 @@ pub fn init(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let next = MenuItem::with_id(app, ID_NEXT, "Next Track", true, None::<&str>)?;
     let previous = MenuItem::with_id(app, ID_PREVIOUS, "Previous Track", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
+    let discord = CheckMenuItem::with_id(app, ID_DISCORD, "Show on Discord", true, discord_rpc::is_enabled(app), None::<&str>)?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
     let toggle_window = MenuItem::with_id(app, ID_TOGGLE_WINDOW, "Hide BitChord", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit BitChord", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
-        &[&now_playing, &sep1, &play_pause, &next, &previous, &sep2, &toggle_window, &quit],
+        &[&now_playing, &sep1, &play_pause, &next, &previous, &sep2, &discord, &sep3, &toggle_window, &quit],
     )?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("BitChord")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| handle_menu(app, event.id().as_ref()))
+        .on_menu_event(move |app, event| {
+            if event.id().as_ref() == ID_DISCORD {
+                // The item has already ticked or unticked itself.
+                discord_rpc::set_enabled(app, discord.is_checked().unwrap_or(false));
+            } else {
+                handle_menu(app, event.id().as_ref());
+            }
+        })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -51,7 +62,8 @@ pub fn init(app: &AppHandle<Wry>) -> tauri::Result<()> {
                 ..
             } = event
             {
-                toggle_visibility(tray.app_handle());
+                // As Windows' own tray apps do: a click brings the player up, the menu hides it.
+                show_window(tray.app_handle());
             }
         });
 

@@ -5,10 +5,15 @@
 //! token from a discord.com tab — the Windows shell speaks Discord's official
 //! local Rich Presence protocol directly: no login, no user token, no extra
 //! crates, and zero CPU while idle or when Discord Desktop isn't running.
+//!
+//! Off until the user turns it on (the tray's "Show on Discord"), as the
+//! extension's presence is off until "Connect Discord": what someone listens to
+//! is theirs to share. The choice is kept in the app's data folder.
 
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::sync::mpsc::{self, Sender};
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -27,7 +32,7 @@ const OP_CLOSE: u32 = 2;
 
 /// Guard against corrupt frames over the pipe.
 const MAX_FRAME_LEN: usize = 64 * 1024;
-/// Minimum interval between pipe-open attempts when Discord Desktop isn't running.
+/// Between attempts to reach Discord Desktop while there's a card to show and it isn't running.
 const RECONNECT_COOLDOWN: Duration = Duration::from_secs(15);
 /// Position drift threshold (seconds) above which a seek triggers a fresh SET_ACTIVITY.
 const SEEK_DRIFT_SECS: f64 = 3.0;
@@ -52,6 +57,7 @@ pub(crate) struct Snapshot {
 
 enum Command {
     Update(Snapshot),
+    Enable(bool),
     Shutdown,
 }
 
@@ -84,16 +90,37 @@ impl Snapshot {
     }
 }
 
-pub fn init() -> Presence {
+/// Where the user's choice is kept: "on", or anything else (or nothing) for off.
+fn setting<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    Some(app.path().app_local_data_dir().ok()?.join("discord-presence"))
+}
+
+pub fn is_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
+    setting(app).and_then(|f| fs::read_to_string(f).ok()).is_some_and(|v| v.trim() == "on")
+}
+
+pub fn init<R: Runtime>(app: &AppHandle<R>) -> Presence {
     let (tx, rx) = mpsc::channel();
+    let enabled = is_enabled(app);
     let _ = thread::Builder::new()
         .name("bitchord-discord-ipc".into())
-        .spawn(move || worker(rx));
+        .spawn(move || worker(rx, enabled, IpcConn::connect, RECONNECT_COOLDOWN));
     Presence { tx }
 }
 
 pub fn update(presence: &Presence, state: &MediaState) {
     let _ = presence.tx.send(Command::Update(Snapshot::from_media(state)));
+}
+
+/// Turns presence on or off (the card goes at once) and remembers it.
+pub fn set_enabled<R: Runtime>(app: &AppHandle<R>, on: bool) {
+    if let Some(file) = setting(app) {
+        let _ = file.parent().map(fs::create_dir_all);
+        let _ = fs::write(file, if on { "on" } else { "off" });
+    }
+    if let Some(presence) = app.try_state::<Presence>() {
+        let _ = presence.tx.send(Command::Enable(on));
+    }
 }
 
 pub fn shutdown<R: Runtime>(app: &AppHandle<R>) {
@@ -104,68 +131,80 @@ pub fn shutdown<R: Runtime>(app: &AppHandle<R>) {
 
 // ---- Worker loop ---------------------------------------------------------------
 
-fn worker(rx: mpsc::Receiver<Command>) {
-    let mut conn: Option<IpcConn> = None;
+/// Brings Discord's card in line with what it should show: the playing track while
+/// presence is on, else nothing. It sleeps until a command arrives, except while a
+/// card is waiting for Discord Desktop, when it tries again every RECONNECT_COOLDOWN
+/// (so starting Discord mid-song shows the song without waiting for the next one).
+fn worker<P: Read + Write>(
+    rx: Receiver<Command>,
+    mut enabled: bool,
+    mut connect: impl FnMut() -> io::Result<IpcConn<P>>,
+    cooldown: Duration,
+) {
+    let mut latest: Option<Snapshot> = None;
+    // What Discord is showing; a closed pipe clears it, as Discord drops a gone client's card.
+    let mut shown: Option<Snapshot> = None;
+    let mut conn: Option<IpcConn<P>> = None;
     let mut last_attempt: Option<Instant> = None;
-    let mut last_sent: Option<Snapshot> = None;
-    let mut has_active_card = false;
     let mut seq: u64 = 0;
 
-    while let Ok(mut cmd) = rx.recv() {
-        // Coalesce bursts (metadata + position + playback arriving back-to-back).
-        while let Ok(next) = rx.try_recv() {
-            cmd = next;
-            if matches!(cmd, Command::Shutdown) {
-                break;
+    loop {
+        let wanted = latest.as_ref().filter(|s| enabled && s.is_active());
+        let stale = match (&shown, wanted) {
+            (None, None) => false,
+            (Some(prev), Some(next)) => should_publish(Some(prev), next),
+            _ => true,
+        };
+        if stale {
+            if conn.is_none() && last_attempt.is_none_or(|t| t.elapsed() >= cooldown) {
+                last_attempt = Some(Instant::now());
+                conn = connect().ok();
+            }
+            if let Some(pipe) = conn.as_mut() {
+                seq += 1;
+                if pipe.send_activity(wanted.and_then(build_activity), seq).is_ok() {
+                    shown = wanted.cloned();
+                } else {
+                    conn = None;
+                    shown = None;
+                }
             }
         }
+        // Off: let go of Discord once the card is gone.
+        if !enabled
+            && shown.is_none()
+            && let Some(pipe) = conn.take()
+        {
+            let _ = pipe.close();
+        }
 
-        match cmd {
-            Command::Shutdown => {
-                if let Some(mut pipe) = conn.take() {
-                    if has_active_card {
-                        seq += 1;
-                        let _ = pipe.send_activity(None, seq);
-                    }
-                    let _ = pipe.close();
-                }
-                return;
+        let waiting = conn.is_none() && wanted.is_some();
+        let first = if waiting {
+            match rx.recv_timeout(cooldown) {
+                Ok(cmd) => cmd,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return,
             }
-            Command::Update(snapshot) => {
-                if !should_publish(last_sent.as_ref(), &snapshot) {
-                    continue;
-                }
-
-                // If nothing is playing and we never published a card, stay completely idle.
-                if !snapshot.is_active() && !has_active_card {
-                    last_sent = Some(snapshot);
-                    continue;
-                }
-
-                if conn.is_none() {
-                    if last_attempt.is_some_and(|t| t.elapsed() < RECONNECT_COOLDOWN) {
-                        continue;
+        } else {
+            match rx.recv() {
+                Ok(cmd) => cmd,
+                Err(_) => return,
+            }
+        };
+        // Coalesce bursts (metadata, position and playback arrive back to back).
+        for cmd in std::iter::once(first).chain(rx.try_iter()) {
+            match cmd {
+                Command::Update(snapshot) => latest = Some(snapshot),
+                Command::Enable(on) => enabled = on,
+                Command::Shutdown => {
+                    if let Some(mut pipe) = conn.take() {
+                        if shown.is_some() {
+                            seq += 1;
+                            let _ = pipe.send_activity(None, seq);
+                        }
+                        let _ = pipe.close();
                     }
-                    last_attempt = Some(Instant::now());
-                    conn = IpcConn::connect().ok();
-                    if conn.is_none() {
-                        continue;
-                    }
-                }
-
-                let activity = build_activity(&snapshot);
-                let active_now = activity.is_some();
-                seq += 1;
-                if let Some(pipe) = conn.as_mut() {
-                    if pipe.send_activity(activity, seq).is_ok() {
-                        has_active_card = active_now;
-                        last_sent = Some(snapshot);
-                    } else {
-                        // Discord closed or restarted: drop the handle and retry on the next eligible update.
-                        conn = None;
-                        has_active_card = false;
-                        last_sent = None;
-                    }
+                    return;
                 }
             }
         }
@@ -313,36 +352,38 @@ pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<(u32, Value)> {
     Ok((opcode, payload))
 }
 
-struct IpcConn {
-    pipe: File,
+fn pipe_path(slot: u8) -> String {
+    format!(r"\\.\pipe\discord-ipc-{slot}")
+}
+
+struct IpcConn<P: Read + Write = File> {
+    pipe: P,
 }
 
 impl IpcConn {
+    /// The first of Discord Desktop's pipes that answers (a second Discord, PTB or
+    /// Canary, takes the next number).
     fn connect() -> io::Result<Self> {
         let mut last_err = io::Error::new(io::ErrorKind::NotFound, "no Discord IPC pipe found");
         for slot in 0..10 {
-            let path = format!(r"\\.\pipe\discord-ipc-{slot}");
-            match OpenOptions::new().read(true).write(true).open(&path) {
-                Ok(mut pipe) => {
-                    let handshake = encode_frame(
-                        OP_HANDSHAKE,
-                        &json!({ "v": 1, "client_id": APPLICATION_ID }),
-                    )?;
-                    pipe.write_all(&handshake)?;
-                    pipe.flush()?;
-                    let (op, _) = read_frame(&mut pipe)?;
-                    if op == OP_CLOSE {
-                        return Err(io::Error::new(
-                            io::ErrorKind::ConnectionRefused,
-                            "Discord rejected handshake",
-                        ));
-                    }
-                    return Ok(Self { pipe });
-                }
+            match OpenOptions::new().read(true).write(true).open(pipe_path(slot)) {
+                Ok(pipe) => return IpcConn::handshake(pipe),
                 Err(err) => last_err = err,
             }
         }
         Err(last_err)
+    }
+}
+
+impl<P: Read + Write> IpcConn<P> {
+    fn handshake(mut pipe: P) -> io::Result<Self> {
+        pipe.write_all(&encode_frame(OP_HANDSHAKE, &json!({ "v": 1, "client_id": APPLICATION_ID }))?)?;
+        pipe.flush()?;
+        let (op, _) = read_frame(&mut pipe)?;
+        if op == OP_CLOSE {
+            return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "Discord rejected handshake"));
+        }
+        Ok(Self { pipe })
     }
 
     fn send_activity(&mut self, activity: Option<Value>, seq: u64) -> io::Result<()> {
@@ -381,9 +422,170 @@ mod tests {
 
     use serde_json::json;
 
+    use std::collections::VecDeque;
+    use std::io::{self, Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    use serde_json::Value;
+
     use super::{
-        OP_FRAME, Snapshot, build_activity, clamp_field, encode_frame, read_frame, should_publish,
+        Command, IpcConn, OP_CLOSE, OP_FRAME, OP_HANDSHAKE, Snapshot, build_activity, clamp_field, encode_frame,
+        read_frame, should_publish, worker,
     };
+
+    /// Discord's end of the pipe: records every frame and answers each one, as Discord does.
+    struct FakeDiscord {
+        received: Arc<Mutex<Vec<(u32, Value)>>>,
+        written: Vec<u8>,
+        replies: VecDeque<u8>,
+    }
+
+    impl Write for FakeDiscord {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.written.extend_from_slice(buf);
+            while self.written.len() >= 8 {
+                let len = u32::from_le_bytes(self.written[4..8].try_into().unwrap()) as usize;
+                if self.written.len() < 8 + len {
+                    break;
+                }
+                let frame: Vec<u8> = self.written.drain(..8 + len).collect();
+                let (op, body) = read_frame(&mut Cursor::new(frame)).unwrap();
+                self.received.lock().unwrap().push((op, body));
+                if op != OP_CLOSE {
+                    self.replies.extend(encode_frame(OP_FRAME, &json!({ "evt": null })).unwrap());
+                }
+            }
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Read for FakeDiscord {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = buf.len().min(self.replies.len());
+            for (slot, byte) in buf.iter_mut().zip(self.replies.drain(..n)) {
+                *slot = byte;
+            }
+            Ok(n)
+        }
+    }
+
+    struct Harness {
+        tx: mpsc::Sender<Command>,
+        received: Arc<Mutex<Vec<(u32, Value)>>>,
+        attempts: Arc<AtomicUsize>,
+        worker: thread::JoinHandle<()>,
+    }
+
+    /// A worker against a fake Discord that isn't running for the first [absent] attempts.
+    fn harness(enabled: bool, absent: usize) -> Harness {
+        let (tx, rx) = mpsc::channel();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let (log, count) = (received.clone(), attempts.clone());
+        let connect = move || {
+            if count.fetch_add(1, Ordering::SeqCst) < absent {
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
+            IpcConn::handshake(FakeDiscord { received: log.clone(), written: Vec::new(), replies: VecDeque::new() })
+        };
+        let worker = thread::spawn(move || worker(rx, enabled, connect, Duration::from_millis(50)));
+        Harness { tx, received, attempts, worker }
+    }
+
+    impl Harness {
+        /// The SET_ACTIVITY activities sent so far (null for a cleared card), and whether the pipe was closed.
+        fn activities(&self) -> (Vec<Value>, bool) {
+            Harness::summarise(&self.received.lock().unwrap())
+        }
+
+        fn summarise(frames: &[(u32, Value)]) -> (Vec<Value>, bool) {
+            let sets = frames.iter().filter(|(op, _)| *op == OP_FRAME).map(|(_, b)| b["args"]["activity"].clone());
+            (sets.collect(), frames.iter().any(|(op, _)| *op == OP_CLOSE))
+        }
+
+        fn wait_for(&self, what: &str, done: impl Fn(&(Vec<Value>, bool)) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !done(&self.activities()) {
+                assert!(Instant::now() < deadline, "timed out waiting for {what}: {:?}", self.activities());
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        fn stop(self) -> (Vec<Value>, bool) {
+            self.tx.send(Command::Shutdown).unwrap();
+            let seen = self.received.clone();
+            self.worker.join().unwrap();
+            Harness::summarise(&seen.lock().unwrap())
+        }
+    }
+
+    #[test]
+    fn off_by_default_never_reaches_discord() {
+        let h = harness(false, 0);
+        h.tx.send(Command::Update(sample_snapshot())).unwrap();
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(h.attempts.load(Ordering::SeqCst), 0, "presence is off, so Discord isn't even opened");
+        assert_eq!(h.stop(), (vec![], false));
+    }
+
+    #[test]
+    fn turning_it_on_shows_the_card_and_off_clears_it_and_lets_go() {
+        let h = harness(false, 0);
+        h.tx.send(Command::Update(sample_snapshot())).unwrap();
+        h.tx.send(Command::Enable(true)).unwrap();
+        h.wait_for("the card", |(sets, _)| sets.len() == 1);
+        assert_eq!(h.received.lock().unwrap()[0].0, OP_HANDSHAKE);
+        assert_eq!(h.activities().0[0]["details"], "Midnight City");
+
+        h.tx.send(Command::Enable(false)).unwrap();
+        h.wait_for("the card cleared and the pipe closed", |(sets, closed)| sets.len() == 2 && *closed);
+        assert!(h.activities().0[1].is_null());
+        h.stop();
+    }
+
+    #[test]
+    fn a_card_waiting_for_discord_shows_once_it_starts_with_nothing_new_played() {
+        // Discord isn't running for the first two attempts; no further updates are sent.
+        let h = harness(true, 2);
+        h.tx.send(Command::Update(sample_snapshot())).unwrap();
+        h.wait_for("the card", |(sets, _)| sets.len() == 1);
+        assert_eq!(h.attempts.load(Ordering::SeqCst), 3);
+        h.stop();
+    }
+
+    #[test]
+    fn a_pause_clears_the_card_and_shutting_down_with_one_showing_clears_it() {
+        let h = harness(true, 0);
+        h.tx.send(Command::Update(sample_snapshot())).unwrap();
+        h.wait_for("the card", |(sets, _)| sets.len() == 1);
+        let mut paused = sample_snapshot();
+        paused.playing = false;
+        h.tx.send(Command::Update(paused)).unwrap();
+        h.wait_for("the card cleared", |(sets, _)| sets.len() == 2);
+        h.tx.send(Command::Update(sample_snapshot())).unwrap();
+        h.wait_for("the card again", |(sets, _)| sets.len() == 3);
+
+        let (sets, closed) = h.stop();
+        assert!(sets[1].is_null() && sets[3].is_null(), "{sets:?}");
+        assert!(closed);
+    }
+
+    /// Against a real pipe server (Discord Desktop, or a stand-in serving `discord-ipc-0`),
+    /// so the framing is checked over Windows' named pipes rather than in memory.
+    #[test]
+    #[ignore = "needs Discord Desktop or a fake Discord pipe server"]
+    fn real_pipe_handshake_and_activity() {
+        let mut conn = IpcConn::connect().expect("no Discord pipe answered");
+        conn.send_activity(build_activity(&sample_snapshot()), 1).expect("SET_ACTIVITY");
+        conn.send_activity(None, 2).expect("clearing SET_ACTIVITY");
+        conn.close().expect("close");
+    }
 
     fn sample_snapshot() -> Snapshot {
         Snapshot {

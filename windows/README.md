@@ -150,13 +150,16 @@ settings and sign-ins don't carry over (different storage).
   position, duration, rate, state) and runs the player's own handlers when a button is pressed.
   Windows takes the name and icon from the installer's shortcuts, so a copy run without installing
   shows "Unknown app" there.
-- **Discord Rich Presence (`src/discord_rpc.rs`):** Connects directly to Discord Desktop over Windows'
-  local IPC named pipe (`\\.\pipe\discord-ipc-0..9`) using BitChord's official application ID, without
-  a Discord login or user token. While Discord Desktop isn't running, or while nothing is playing,
-  the worker stays idle with zero CPU usage.
-- **System tray (`src/tray.rs`):** Adds a notification-area icon with the current track, Play/Pause,
-  Next, Previous, Show/Hide and Quit. Hiding to the tray puts WebView2 into the same hidden low-memory
-  state as minimising (`src/memory.rs`).
+- **Discord Rich Presence (`src/discord_rpc.rs`):** Off until you tick **Show on Discord** in the
+  tray menu, as the extension's presence is off until "Connect Discord"; the choice is remembered.
+  It then talks to Discord Desktop over Windows' local IPC named pipe (`\\.\pipe\discord-ipc-0..9`)
+  with BitChord's own application ID, so there's no Discord login or user token. The card shows
+  while a track plays and clears on pause. With presence off, or nothing playing, the worker sleeps;
+  with a card waiting for Discord Desktop to start, it tries the pipe every 15 seconds.
+- **System tray (`src/tray.rs`):** A notification-area icon with the current track, Play/Pause,
+  Next, Previous, Show on Discord, Show/Hide and Quit. Clicking the icon brings the player up.
+  Hiding to the tray puts WebView2 into the same hidden low-memory state as minimising
+  (`src/memory.rs`).
 
 ## Known limits
 

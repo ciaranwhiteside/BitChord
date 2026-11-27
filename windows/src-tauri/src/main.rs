@@ -52,7 +52,7 @@ fn main() {
             let app_id: Vec<u16> = app.config().identifier.encode_utf16().chain([0]).collect();
             unsafe { windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr()) };
 
-            app.manage(discord_rpc::init());
+            app.manage(discord_rpc::init(app.handle()));
 
             // scripts/build.mjs bundles the built extension at resources/extensions/bitchord.
             let extensions = app.path().resource_dir()?.join("extensions");
