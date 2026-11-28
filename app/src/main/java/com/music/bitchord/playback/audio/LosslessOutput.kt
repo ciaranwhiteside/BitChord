@@ -34,7 +34,8 @@ import java.util.Locale
  *    SSC UHQ.** SBC, AAC, aptX, aptX HD, LC3 (LE Audio) and Opus are all lossy
  *    at bitrates well below CD audio, and do not count — nor does plain SSC,
  *    which tops out at 512 kbps; only its UHQ mode (24-bit/96 kHz, Galaxy S23
- *    and later with Buds3/Buds4) is in LDAC's class.
+ *    and later with Buds3/Buds4) is in LDAC's class. Only aptX Lossless is
+ *    bit-exact, though: see [isBitExactBluetoothCodec] for that question.
  *
  * The phone's own speaker, earpiece, hearing aids, casting and BLE Audio do
  * not count either. Bluetooth is only counted when Android names the codec,
@@ -101,7 +102,9 @@ object LosslessOutput {
             .toSet()
         val telemetry = tracker?.telemetry?.value
         val named = telemetry?.takeIf { it.hasNamedCodec }
-        val next = decide(outputs, named?.codecName, named?.sampleRateHz)
+        @Suppress("DEPRECATION")
+        val bluetoothActive = audioManager?.isBluetoothA2dpOn == true
+        val next = decide(outputs, named?.codecName, named?.sampleRateHz, bluetoothActive)
         if (next != _state.value) {
             // The rate is here for codecs we have never seen a phone name —
             // Wi-Fi earbuds, vendor codecs — so a pasted log shows what to match.
@@ -115,7 +118,15 @@ object LosslessOutput {
      * codec Android named (null if it named none), with the sample rate that
      * codec is configured for. Pure, for tests.
      */
-    internal fun decide(outputTypes: Set<Int>, bluetoothCodec: String?, bluetoothSampleRateHz: Int? = null): State {
+    internal fun decide(
+        outputTypes: Set<Int>,
+        bluetoothCodec: String?,
+        bluetoothSampleRateHz: Int? = null,
+        bluetoothActive: Boolean = false,
+    ): State {
+        // A connected DAC does not make A2DP lossless. When Android says A2DP
+        // is the active route, only the Bluetooth codec decides.
+        if (bluetoothActive) return bluetoothDecision(outputTypes, bluetoothCodec, bluetoothSampleRateHz)
         val cabled = when {
             outputTypes.any { it in WIRED } -> Kind.WIRED
             outputTypes.any { it in USB } -> Kind.USB
@@ -124,9 +135,16 @@ object LosslessOutput {
             else -> null
         }
         if (cabled != null) return State(capable = true, via = cabled, bluetoothCodec = bluetoothCodec)
-        if (AudioDeviceInfo.TYPE_BLUETOOTH_A2DP !in outputTypes) return State()
+        // No cable: A2DP is the only candidate left even when the deprecated
+        // isBluetoothA2dpOn() did not say so (it is unreliable on newer
+        // releases), so the codec still decides rather than refusing outright.
+        return bluetoothDecision(outputTypes, bluetoothCodec, bluetoothSampleRateHz)
+    }
+
+    private fun bluetoothDecision(outputTypes: Set<Int>, bluetoothCodec: String?, sampleRateHz: Int?): State {
+        if (AudioDeviceInfo.TYPE_BLUETOOTH_A2DP !in outputTypes) return State(bluetoothCodec = bluetoothCodec)
         if (bluetoothCodec == null) return State(bluetoothCodecUnknown = true)
-        val lossless = isLosslessBluetoothCodec(bluetoothCodec, bluetoothSampleRateHz)
+        val lossless = isLosslessBluetoothCodec(bluetoothCodec, sampleRateHz)
         return State(
             capable = lossless,
             via = Kind.BLUETOOTH.takeIf { lossless },
@@ -136,17 +154,29 @@ object LosslessOutput {
 
     /**
      * LDAC, any LHDC generation, aptX Lossless or SSC UHQ — by the name Android
-     * reports. Samsung's codec may be named for the family alone ("SSC",
-     * "Samsung Seamless") whichever mode it is in, so a Samsung name without
-     * "UHQ" still counts when it runs at 88.2 kHz or above: UHQ is the only
-     * Samsung mode that does.
+     * reports. This is the gate addons with `checkValidLossless` use, so these
+     * high-bitrate codecs keep those addons available. Samsung's codec may be
+     * named for the family alone ("SSC", "Samsung Seamless") whichever mode it
+     * is in, so a Samsung name without "UHQ" still counts when it runs at
+     * 88.2 kHz or above: UHQ is the only Samsung mode that does.
      */
     internal fun isLosslessBluetoothCodec(name: String, sampleRateHz: Int? = null): Boolean {
         val codec = name.uppercase(Locale.ROOT)
-        if ("LDAC" in codec || "LHDC" in codec || ("APTX" in codec && "LOSSLESS" in codec)) return true
+        if ("LDAC" in codec || "LHDC" in codec || isBitExactBluetoothCodec(name)) return true
         if ("UHQ" in codec) return true
         val samsung = SAMSUNG_NAMES.any { it in codec }
         return samsung && sampleRateHz != null && sampleRateHz >= 88_200
+    }
+
+    /**
+     * Whether a Bluetooth codec carries the samples unchanged — aptX Lossless
+     * only. Narrower than [isLosslessBluetoothCodec] on purpose: LDAC and LHDC
+     * are good enough for the addon gate but are still a lossy re-encode, and
+     * the pipeline dialog's bit-exact verdict has to say so.
+     */
+    internal fun isBitExactBluetoothCodec(name: String): Boolean {
+        val codec = name.uppercase(Locale.ROOT)
+        return "APTX" in codec && "LOSSLESS" in codec
     }
 
     private val SAMSUNG_NAMES = listOf("SSC", "SAMSUNG", "SCALABLE", "SEAMLESS")

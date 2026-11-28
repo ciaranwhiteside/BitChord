@@ -1255,12 +1255,6 @@
     </plurals>
     <string name="party_queue_full">キューがいっぱいです（パーティーの上限は%d曲）</string>
 
-    <string name="paxsenix_api_key">PaxSenix API key</string>
-
-    <string name="paxsenix_api_key_configured">PaxSenix API key — configured</string>
-
-    <string name="paxsenix_api_key_missing">PaxSenix API key — optional， not configured</string>
-
 
 
 
@@ -1537,4 +1531,64 @@
     <string name="drive_backup_row_subtitle">Replay をすべてのデバイスでバックアップ・同期</string>
     <string name="drive_over_cellular">モバイルデータで同期</string>
     <string name="drive_over_cellular_subtitle">オフの場合、自動同期は Wi-Fi 接続を待ちます</string>
+    <string name="automix_art_transition">アートワークのトランジション</string>
+    <string name="automix_art_transition_subtitle">AutoMix中に曲と曲の間でカバーアートを滑らかに切り替えます。</string>
+    <string name="automix_mini_art_transition">ミニプレーヤーのアートトランジション</string>
+    <string name="automix_mini_art_transition_subtitle">AutoMix中にミニプレーヤーでアートワークのトランジションを表示します。</string>
+    <string name="show_best_part">ベストパートボタン</string>
+    <string name="show_best_part_subtitle">曲の中で最もリピートされている部分にジャンプするアートワーク上のボタン</string>
+    <string name="replay_year_open">%1$sのReplayを開く</string>
+    <string name="replay_year_building">あなたの1年をまとめています…</string>
+    <string name="replay_year_opener_start">BitChordでの</string>
+    <string name="replay_year_opener_end">年</string>
+    <string name="replay_year_opener_detail">あなたが聴いた音楽を振り返りましょう。</string>
+    <string name="replay_year_minutes_start">今年あなたが音楽を聴いた時間は</string>
+    <plurals name="replay_year_minutes_word">
+        <item quantity="other">分</item>
+    </plurals>
+    <string name="replay_year_minutes_days_start">つまり</string>
+    <string name="replay_year_minutes_days_value">%1$s日</string>
+    <string name="replay_year_minutes_hours_value">%1$s時間</string>
+    <string name="replay_year_minutes_days_end">分の音楽です。</string>
+    <string name="replay_year_busiest_start">いちばん聴いた日は</string>
+    <string name="replay_year_busiest_minutes">1日で%1$s分の音楽</string>
+    <string name="replay_year_busiest_song">主に%1$s</string>
+    <string name="replay_year_clock_start">あなたが最も活発だったのは</string>
+    <string name="replay_year_night_owl">夜型</string>
+    <string name="replay_year_night_owl_detail">リスニングの多くは午後10時以降でした。</string>
+    <string name="replay_year_early_bird">朝型</string>
+    <string name="replay_year_early_bird_detail">あなたの1日は午前10時前の音楽から始まりました。</string>
+    <string name="replay_year_golden_hour">ゴールデンアワー</string>
+    <string name="replay_year_golden_hour_detail">夜になると音楽が流れ出しました。</string>
+    <string name="replay_year_daytime">昼の旅人</string>
+    <string name="replay_year_daytime_detail">1日中音楽を流し続けていました。</string>
+    <string name="replay_year_all_day">24時間</string>
+    <string name="replay_year_all_day_detail">朝も昼も夜も、何かが流れていました。</string>
+    <string name="replay_year_genres_start">今年のあなたのサウンド</string>
+    <string name="replay_year_artist_start">今年のトップアーティストは…</string>
+    <string name="replay_year_minutes_together">一緒に%1$s分</string>
+    <string name="replay_year_top_artists">トップアーティスト</string>
+    <string name="replay_year_song_start">そして今年の1曲は…</string>
+    <plurals name="replay_year_played_times">
+        <item quantity="other">%1$s回再生</item>
+    </plurals>
+    <string name="replay_year_top_songs">そのほかのトップソング</string>
+    <string name="replay_year_albums">聴き込んだアルバム</string>
+    <string name="replay_year_months">月ごとのあなたの1年</string>
+    <string name="replay_year_discovery_start">今年あなたが出会ったのは</string>
+    <plurals name="replay_year_songs_word">
+        <item quantity="other">曲</item>
+    </plurals>
+    <plurals name="replay_year_artists_word">
+        <item quantity="other">アーティスト</item>
+    </plurals>
+    <plurals name="replay_year_albums_word">
+        <item quantity="other">アルバム</item>
+    </plurals>
+    <string name="replay_year_summary_title">あなたの%1$s</string>
+    <string name="replay_year_summary_artists">トップアーティスト</string>
+    <string name="replay_year_summary_songs">トップソング</string>
+    <string name="replay_year_summary_minutes">再生時間（分）</string>
+    <string name="replay_year_mute">ストーリーをミュート</string>
+    <string name="replay_year_unmute">ストーリーのミュートを解除</string>
 </resources>

@@ -10,6 +10,7 @@ import android.net.NetworkCapabilities
 import androidx.media3.common.Player
 import com.music.bitchord.BuildConfig
 import com.music.bitchord.auth.AuthStore
+import com.music.bitchord.data.scrobbling.ScrobbleRetry
 import com.music.bitchord.data.canvas.SpotifyToken
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.lyrics.LyricsSource
@@ -697,9 +698,6 @@ object AppSettings {
      */
     val prioritizeSyllableSync = MutableStateFlow(false)
 
-    /** User-issued credential required by api.paxsenix.org. */
-    val paxSenixApiKey = MutableStateFlow("")
-
     /**
      * Disk budget for cached audio. [AudioCache][com.music.bitchord.playback.AudioCache] evicts past it.
      * [UNLIMITED_CACHE_LIMIT_BYTES] means no ceiling of the app's own.
@@ -1172,8 +1170,6 @@ object AppSettings {
         lyricsSources.value = readLyricsSources()
         lyricsSourceOrder.value = readLyricsSourceOrder()
         prioritizeSyllableSync.value = prefs.getBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, false)
-        paxSenixApiKey.value = secret(KEY_PAXSENIX_API_KEY)
-        com.music.bitchord.data.lyrics.PaxSenix.setApiKey(paxSenixApiKey.value)
         audioCacheLimitBytes.value = clampCacheLimit(prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES))
         showCacheFolder.value = prefs.getBoolean(KEY_SHOW_CACHE_FOLDER, false)
         lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
@@ -1766,12 +1762,10 @@ object AppSettings {
      */
     private val LEGACY_SOURCES = setOf(
         LyricsSource.LYRICS_PLUS,
-        LyricsSource.PAXSENIX,
         LyricsSource.BETTER_LYRICS,
         LyricsSource.SIMP_MUSIC,
         LyricsSource.KUGOU,
         LyricsSource.LRCLIB,
-        LyricsSource.MUSIXMATCH,
         LyricsSource.GENIUS,
     )
 
@@ -1798,13 +1792,6 @@ object AppSettings {
     fun setPrioritizeSyllableSync(value: Boolean) {
         prioritizeSyllableSync.value = value
         prefs.edit().putBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, value).apply()
-    }
-
-    fun setPaxSenixApiKey(value: String) {
-        val normalized = com.music.bitchord.data.lyrics.normalizePaxSenixApiKey(value)
-        paxSenixApiKey.value = normalized
-        putSecret(KEY_PAXSENIX_API_KEY, normalized)
-        com.music.bitchord.data.lyrics.PaxSenix.setApiKey(normalized)
     }
 
     /**
@@ -1916,6 +1903,10 @@ object AppSettings {
     fun setLastfmSessionKey(value: String) {
         lastfmSessionKey.value = value
         putSecret(KEY_LASTFM_SESSION_KEY, value)
+        // Disconnecting is a sign-out: the listens waiting to be delivered
+        // belong to the account that just left and must not be sent under the
+        // next one, nor left on disk for it to find.
+        if (value.isBlank()) ScrobbleRetry.clearLastFm()
     }
 
     fun setLastfmApiKey(value: String) {
@@ -2032,6 +2023,7 @@ object AppSettings {
     fun setListenBrainzToken(value: String) {
         listenBrainzToken.value = value
         putSecret(KEY_LISTENBRAINZ_TOKEN, value)
+        if (value.isBlank()) ScrobbleRetry.clearListenBrainz()
     }
 
     fun setListenBrainzPrimaryArtistOnly(value: Boolean) {
@@ -2370,7 +2362,6 @@ object AppSettings {
         KEY_LASTFM_SECRET,
         KEY_LISTENBRAINZ_TOKEN,
         KEY_SPOTIFY_SPDC_TOKEN,
-        KEY_PAXSENIX_API_KEY,
     )
 
     /**
@@ -2504,7 +2495,6 @@ object AppSettings {
     private const val KEY_LYRICS_SOURCES_SEEN = "lyrics_sources_seen"
     private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"
     private const val KEY_PRIORITIZE_SYLLABLE_SYNC = "prioritize_syllable_sync"
-    private const val KEY_PAXSENIX_API_KEY = "paxsenix_api_key"
     private const val KEY_REPLAY_GENRES = "replay_genres"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_SHOW_CACHE_FOLDER = "show_cache_folder"

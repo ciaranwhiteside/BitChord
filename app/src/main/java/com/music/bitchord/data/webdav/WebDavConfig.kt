@@ -30,6 +30,20 @@ object WebDavConfig {
         }
     }
 
+    /**
+     * When this build's network policy blocks cleartext, reject `http://`
+     * explicitly with an actionable message instead of letting every request
+     * fail as an unexplained connection error. See [cleartextPermitted] for
+     * where `cleartextAllowed` comes from.
+     */
+    fun cleartextRefusal(url: String, cleartextAllowed: Boolean): String? {
+        val normalized = normalizeUrl(url)
+        if (!cleartextAllowed && normalized.startsWith("http://", ignoreCase = true)) {
+            return "WebDAV requires an HTTPS address; plain HTTP is blocked by this build's network policy"
+        }
+        return null
+    }
+
     fun isConfigured(url: String): Boolean {
         val normalized = normalizeUrl(url)
         if (!normalized.startsWith("http://", ignoreCase = true) &&
