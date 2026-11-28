@@ -150,9 +150,9 @@ internal fun bitExactVerdict(
     loudnessActive -> "No — loudness normalization"
     eqActive -> "No — equalizer"
     spatialActive -> "No — spatial audio"
-    // aptX Lossless is the one A2DP codec LosslessOutput accepts; calling it a
-    // lossy re-encode here would contradict that gate.
-    bluetooth && bluetoothCodec?.let(LosslessOutput::isLosslessBluetoothCodec) != true ->
+    // aptX Lossless is the one bit-exact A2DP codec; calling it a
+    // lossy re-encode here would be wrong. LDAC/LHDC pass the addon gate but are lossy.
+    bluetooth && bluetoothCodec?.let(LosslessOutput::isBitExactBluetoothCodec) != true ->
         "No — lossy Bluetooth${bluetoothCodec?.let { " ($it)" }.orEmpty()} re-encode"
     outputExact -> "Yes${outputExactDetail?.let { " ($it)" }.orEmpty()}"
     else -> "No — ${outputExactDetail ?: "converted downstream"}"

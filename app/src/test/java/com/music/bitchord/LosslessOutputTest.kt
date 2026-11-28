@@ -42,12 +42,12 @@ class LosslessOutputTest {
     fun `lossy A2DP alone is not lossless when the active flag is unreliable`() {
         val state = LosslessOutput.decide(
             outputTypes = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP),
-            bluetoothCodec = "LDAC",
-            bluetoothSampleRateHz = 96_000,
+            bluetoothCodec = "AAC",
+            bluetoothSampleRateHz = 48_000,
             bluetoothActive = false,
         )
         assertFalse(state.capable)
-        assertEquals("LDAC", state.bluetoothCodec)
+        assertEquals("AAC", state.bluetoothCodec)
     }
 
     @Test
@@ -62,12 +62,15 @@ class LosslessOutputTest {
     }
 
     @Test
-    fun `lossy Bluetooth codecs never open the lossless gate`() {
-        assertFalse(LosslessOutput.isLosslessBluetoothCodec("LDAC", 44_100))
-        assertFalse(LosslessOutput.isLosslessBluetoothCodec("LDAC", 96_000))
-        assertFalse(LosslessOutput.isLosslessBluetoothCodec("LHDC V5", 96_000))
-        assertFalse(LosslessOutput.isLosslessBluetoothCodec("SSC UHQ", 96_000))
-        assertTrue(LosslessOutput.isLosslessBluetoothCodec("aptX Lossless", 48_000))
+    fun `high-bitrate codecs open the addon gate, but only aptX Lossless is bit-exact`() {
+        for (codec in listOf("LDAC", "LHDC V5", "SSC UHQ", "aptX Lossless")) {
+            assertTrue(codec, LosslessOutput.isLosslessBluetoothCodec(codec, 96_000))
+        }
+        assertFalse(LosslessOutput.isLosslessBluetoothCodec("AAC", 48_000))
+        assertTrue(LosslessOutput.isBitExactBluetoothCodec("aptX Lossless"))
+        for (codec in listOf("LDAC", "LHDC V5", "SSC UHQ")) {
+            assertFalse(codec, LosslessOutput.isBitExactBluetoothCodec(codec))
+        }
     }
 
     @Test

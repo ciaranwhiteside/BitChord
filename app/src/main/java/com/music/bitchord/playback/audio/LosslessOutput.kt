@@ -30,10 +30,12 @@ import java.util.Locale
  *  - **USB:** USB-C headphones, USB DACs and USB audio accessories.
  *  - **HDMI:** HDMI, ARC and eARC (a TV, receiver or soundbar).
  *  - **Dock:** digital and analog docks.
- *  - **aptX Lossless on Bluetooth A2DP.** LDAC, LHDC, Samsung SSC/UHQ, SBC,
- *    AAC, aptX, aptX HD, LC3 and Opus are lossy codecs — higher bitrates and
- *    sample rates do not make them mathematically lossless — so they are
- *    reported but never open this gate.
+ *  - **Bluetooth A2DP on LDAC, LHDC (V3/V4/V5), aptX Lossless or Samsung's
+ *    SSC UHQ.** SBC, AAC, aptX, aptX HD, LC3 (LE Audio) and Opus are all lossy
+ *    at bitrates well below CD audio, and do not count — nor does plain SSC,
+ *    which tops out at 512 kbps; only its UHQ mode (24-bit/96 kHz, Galaxy S23
+ *    and later with Buds3/Buds4) is in LDAC's class. Only aptX Lossless is
+ *    bit-exact, though: see [isBitExactBluetoothCodec] for that question.
  *
  * The phone's own speaker, earpiece, hearing aids, casting and BLE Audio do
  * not count either. Bluetooth is only counted when Android names the codec,
@@ -151,16 +153,33 @@ object LosslessOutput {
     }
 
     /**
-     * aptX Lossless, by the name Android reports. LDAC, LHDC and Samsung's SSC
-     * (UHQ included) are lossy codecs however high their bitrate or sample
-     * rate, so they are reported but never pass. [sampleRateHz] is kept for
-     * callers and logs; it no longer changes the answer.
+     * LDAC, any LHDC generation, aptX Lossless or SSC UHQ — by the name Android
+     * reports. This is the gate addons with `checkValidLossless` use, so these
+     * high-bitrate codecs keep those addons available. Samsung's codec may be
+     * named for the family alone ("SSC", "Samsung Seamless") whichever mode it
+     * is in, so a Samsung name without "UHQ" still counts when it runs at
+     * 88.2 kHz or above: UHQ is the only Samsung mode that does.
      */
-    @Suppress("UNUSED_PARAMETER")
     internal fun isLosslessBluetoothCodec(name: String, sampleRateHz: Int? = null): Boolean {
+        val codec = name.uppercase(Locale.ROOT)
+        if ("LDAC" in codec || "LHDC" in codec || isBitExactBluetoothCodec(name)) return true
+        if ("UHQ" in codec) return true
+        val samsung = SAMSUNG_NAMES.any { it in codec }
+        return samsung && sampleRateHz != null && sampleRateHz >= 88_200
+    }
+
+    /**
+     * Whether a Bluetooth codec carries the samples unchanged — aptX Lossless
+     * only. Narrower than [isLosslessBluetoothCodec] on purpose: LDAC and LHDC
+     * are good enough for the addon gate but are still a lossy re-encode, and
+     * the pipeline dialog's bit-exact verdict has to say so.
+     */
+    internal fun isBitExactBluetoothCodec(name: String): Boolean {
         val codec = name.uppercase(Locale.ROOT)
         return "APTX" in codec && "LOSSLESS" in codec
     }
+
+    private val SAMSUNG_NAMES = listOf("SSC", "SAMSUNG", "SCALABLE", "SEAMLESS")
 
     // AudioDeviceInfo constants, by value so the newer ones compile into older
     // API levels as the plain ints they are; a phone that predates a type
