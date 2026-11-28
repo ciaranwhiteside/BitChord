@@ -59,19 +59,24 @@ import kotlin.coroutines.CoroutineContext
  * Copy Log is shared, pasted into issue reports and sent to maintainers.
  * Signed media URLs and auth headers must not travel with it.
  */
-internal fun redactSensitive(message: String): String = message
-    .replace(
-        Regex("""(?i)([?&](?:token|sig|signature|key|auth|proof|cookie|pot|session|secret|code)=)[^&\s]+"""),
-        "$1<redacted>",
-    )
-    .replace(
-        Regex("""(?i)(authorization:\s*(?:bearer|token)\s+)[^\s,]+"""),
-        "$1<redacted>",
-    )
-    .replace(
-        Regex("""(?i)(x-bitchord-(?:token|proof):\s*)[^\s,]+"""),
-        "$1<redacted>",
-    )
+internal fun redactSensitive(message: String): String {
+    var out = message
+    for (pattern in REDACTIONS) out = pattern.replace(out, "$1<redacted>")
+    return out
+}
+
+/**
+ * Compiled once: every TrackLog line runs through these, playback included.
+ * `lsig` is googlevideo's second signature; header values run to end of line.
+ */
+private val REDACTIONS = listOf(
+    Regex(
+        """(?i)([?&](?:access_token|token|sig|lsig|signature|api_?key|key|auth|proof|cookie|pot|session|secret|code|password)=)[^&\s]+""",
+    ),
+    Regex("""(?i)(authorization:\s*(?:bearer|token|basic)\s+)[^\s,]+"""),
+    Regex("""(?i)(x-bitchord-(?:token|proof):\s*)[^\s,]+"""),
+    Regex("""(?i)((?:set-)?cookie:\s*)[^\r\n]+"""),
+)
 
 object TrackLog {
     /**
@@ -117,7 +122,7 @@ object TrackLog {
     fun w(tag: String, message: String, error: Throwable, about: String? = working.get()) {
         val safe = redactSensitive(message)
         echo?.invoke('W', tag, safe, error)
-        record('W', "$safe\n${error.stackTraceToString()}", about)
+        record('W', withTrace(message, error), about)
     }
 
     fun e(tag: String, message: String, about: String? = working.get()) {
@@ -129,8 +134,16 @@ object TrackLog {
     fun e(tag: String, message: String, error: Throwable, about: String? = working.get()) {
         val safe = redactSensitive(message)
         echo?.invoke('E', tag, safe, error)
-        record('E', "$safe\n${error.stackTraceToString()}", about)
+        record('E', withTrace(message, error), about)
     }
+
+    /**
+     * The line recorded for a message with an error: redacted as a whole,
+     * trace included — exception messages are where full signed URLs land
+     * (a data source's HTTP error carries the request URL).
+     */
+    internal fun withTrace(message: String, error: Throwable): String =
+        redactSensitive("$message\n${error.stackTraceToString()}")
 
     // ── Whose line is it ────────────────────────────────────────────────────
 

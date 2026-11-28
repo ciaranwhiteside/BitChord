@@ -114,8 +114,16 @@ object AddonAuth {
         // credential, and the token is a hardware-bound bearer. They go through
         // the same Keystore-backed store as the YouTube cookie, with the legacy
         // plain files migrated on first open.
-        testerPrefs = EncryptedPrefs.open(context, "bitchord_tester", "bitchord_tester_plain")
-        val p = EncryptedPrefs.open(context, "bitchord_addon_auth", "bitchord_addon_auth_plain")
+        //
+        // The encrypted stores need names of their own. The legacy plain files
+        // are "bitchord_tester" / "bitchord_addon_auth"; opened encrypted under
+        // those same names, the old plaintext entries read back as missing
+        // (users lose their tester code) and stay on disk in clear. Passed as
+        // the plain name instead, EncryptedPrefs moves them in, verifies the
+        // copy, deletes the plain file, and still falls back to that same file
+        // on a device whose Keystore is unusable.
+        testerPrefs = EncryptedPrefs.open(context, "bitchord_tester_secure", "bitchord_tester")
+        val p = EncryptedPrefs.open(context, "bitchord_addon_auth_secure", "bitchord_addon_auth")
         prefs = p
         val token = p.getString("token", null)
         val alias = p.getString("alias", null)

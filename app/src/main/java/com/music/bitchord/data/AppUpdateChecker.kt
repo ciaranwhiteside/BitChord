@@ -210,13 +210,19 @@ object AppUpdateChecker {
                     }
                 }
             }
-            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            val actual = digest.digest().joinToString("") { "%02x".format(java.util.Locale.ROOT, it) }
             val expectedSize = info.apkSize
-            check(expectedSize == null || readTotal == expectedSize) {
-                "Downloaded APK size does not match the release"
+            val failure = when {
+                expectedSize != null && readTotal != expectedSize -> "Downloaded APK size does not match the release"
+                info.apkSha256 != null && !info.apkSha256.equals(actual, ignoreCase = true) ->
+                    "Downloaded APK failed its SHA-256 check"
+                else -> null
             }
-            check(info.apkSha256 == null || info.apkSha256.equals(actual, ignoreCase = true)) {
-                "Downloaded APK failed its SHA-256 check"
+            if (failure != null) {
+                // Never leave a file that failed verification where a later
+                // install could pick it up.
+                target.delete()
+                error(failure)
             }
             _download.value = DownloadState.Ready(target)
         }.onFailure { error ->
@@ -263,9 +269,16 @@ object AppUpdateChecker {
         // Digest and size are checked before this point; also refuse an APK
         // that is a different package, which would otherwise hand the user a
         // silent failed install after a 100 MB download.
-        val archive = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
-        require(archive?.packageName == context.packageName) {
-            "Downloaded APK is not ${context.packageName}"
+        //
+        // Reported through the download state, never thrown: both the phone
+        // and TV dialogs call this straight from a click handler, so an
+        // exception here would crash the app (e.g. a dev build offered the
+        // release package).
+        val archive = runCatching { context.packageManager.getPackageArchiveInfo(file.absolutePath, 0) }.getOrNull()
+        if (!isExpectedPackage(archive?.packageName, context.packageName)) {
+            file.delete()
+            _download.value = DownloadState.Failed("Downloaded APK is not ${context.packageName}")
+            return
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         context.startActivity(
@@ -279,6 +292,10 @@ object AppUpdateChecker {
                 ),
         )
     }
+
+    /** Whether a downloaded APK's package is the one installed; an unreadable archive is not. */
+    internal fun isExpectedPackage(archivePackage: String?, ownPackage: String): Boolean =
+        archivePackage != null && archivePackage == ownPackage
 
     /** A version split into its numeric dotted parts and whether it carries a "-suffix" (e.g. "-beta2"). */
     private data class ParsedVersion(val parts: List<Int>, val isPreRelease: Boolean)
