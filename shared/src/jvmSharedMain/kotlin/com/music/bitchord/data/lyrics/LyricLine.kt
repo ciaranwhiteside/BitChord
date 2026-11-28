@@ -122,6 +122,13 @@ data class LyricSyllable(
 enum class LyricAlignment { Start, End }
 
 /**
+ * Whether Karaoke is offered: only lyrics timed word by word, as Apple's Sing. A translated
+ * line may lose its own words and keep the original's timing in [LyricLine.timingSource].
+ */
+val List<LyricLine>.canSing: Boolean
+    get() = any { it.isWordSynced || it.timingSource?.isWordSynced == true }
+
+/**
  * One synced line. [timeMs] is when it starts; a blank [text] is an
  * instrumental stretch — LRC files mark those with a bare timestamp.
  *
