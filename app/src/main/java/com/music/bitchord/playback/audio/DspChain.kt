@@ -3,6 +3,7 @@ package com.music.bitchord.playback.audio
 import android.util.Log
 import com.music.bitchord.BuildConfig
 import com.music.bitchord.playback.EqualizerProcessor
+import com.music.bitchord.playback.KaraokeProcessor
 import com.music.bitchord.playback.LoudnessProcessor
 import com.music.bitchord.playback.SpatialAudioProcessor
 import com.music.bitchord.playback.TransitionFilterProcessor
@@ -10,7 +11,7 @@ import com.music.bitchord.playback.TransitionFilterProcessor
 /**
  * Composite DSP chain executing BitChord's custom audio processors in their canonical sequence:
  *
- * AudioBlock(Float32) -> SpatialAudioProcessor -> EqualizerProcessor
+ * AudioBlock(Float32) -> KaraokeProcessor -> SpatialAudioProcessor -> EqualizerProcessor
  *   -> TransitionFilterProcessor -> LoudnessProcessor -> AudioBlock(Float32)
  *
  * Operates purely on in-place Float32 audio blocks without intermediate fixed-point quantization,
@@ -36,6 +37,8 @@ class DspChain(
     val equalizer: EqualizerProcessor = EqualizerProcessor(),
     val transition: TransitionFilterProcessor = TransitionFilterProcessor(),
     val loudness: LoudnessProcessor = LoudnessProcessor(),
+    /** First: the vocal mask was computed from the track as decoded, before any shaping. */
+    val karaoke: KaraokeProcessor = KaraokeProcessor(),
 ) : FloatAudioProcessor {
 
     private var currentSampleRate: Int = 0
@@ -43,6 +46,7 @@ class DspChain(
 
     override fun configure(sampleRate: Int, channelCount: Int) {
         this.currentSampleRate = sampleRate
+        karaoke.configure(sampleRate, channelCount)
         spatial.configure(sampleRate, channelCount)
         equalizer.configure(sampleRate, channelCount)
         transition.configure(sampleRate, channelCount)
@@ -51,6 +55,7 @@ class DspChain(
 
     /** A new track has begun gaplessly on this sink; see [LoudnessProcessor.onStreamBoundary]. */
     fun onStreamBoundary() {
+        karaoke.onStreamBoundary()
         loudness.onStreamBoundary()
     }
 
@@ -77,6 +82,7 @@ class DspChain(
             }
         }
 
+        karaoke.process(block)
         spatial.process(block)
         equalizer.process(block)
         transition.process(block)
@@ -96,6 +102,7 @@ class DspChain(
 
     @Suppress("DEPRECATION")
     override fun flush() {
+        karaoke.flush()
         spatial.flush()
         equalizer.flush()
         transition.flush()
@@ -104,6 +111,7 @@ class DspChain(
 
     override fun reset() {
         processCounter = 0L
+        karaoke.reset()
         spatial.reset()
         equalizer.reset()
         transition.reset()

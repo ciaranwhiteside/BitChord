@@ -409,6 +409,8 @@ class PrecisionAudioSink(
             }
 
             // Process normalized Float32 samples through custom DSP chain
+            dspChain.karaoke.blockTrackUs =
+                if (loopBlockUs == C.TIME_UNSET) C.TIME_UNSET else loopBlockUs - loop.streamOffsetUs
             dspChain.process(audioBlock)
 
             // Encode processed samples to target PCM output buffer (Float32 or PCM16)
@@ -509,7 +511,8 @@ class PrecisionAudioSink(
             port.positionUs = position - port.streamOffsetUs
             port.positionNanos = System.nanoTime()
         }
-        return position
+        // Karaoke holds the audio back a fixed amount; the player is told what is heard.
+        return position - dspChain.karaoke.latencyUs
     }
 
     // ---- The Automix loop mix ---------------------------------------------------------------
