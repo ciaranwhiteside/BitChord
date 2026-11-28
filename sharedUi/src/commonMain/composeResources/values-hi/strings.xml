@@ -120,6 +120,13 @@
     <string name="shuffle_on">शफ़ल चालू</string>
     <string name="stereo">स्टीरियो</string>
     <string name="translate_lyrics">लिरिक्स का अनुवाद करें</string>
+    <string name="karaoke_start">साथ गाएँ: आवाज़ धीमी करें</string>
+    <string name="karaoke_stop">साथ गाना बंद करें</string>
+    <string name="karaoke_preparing">आवाज़ तैयार की जा रही है</string>
+    <string name="karaoke_vocal_level">आवाज़ का स्तर</string>
+    <string name="karaoke_not_on_output">कराओके इस आउटपुट पर ऑडियो नहीं बदल सकता</string>
+    <string name="karaoke_failed">कराओके यह गाना नहीं पढ़ सका</string>
+    <string name="karaoke_mix_paused">गाते समय Automix और क्रॉसफ़ेड रुके रहते हैं</string>
     <string name="translating_lyrics_to">%1$s में अनुवाद हो रहा है…</string>
     <string name="up_next">आगे बजेगा</string>
     <string name="upgrading_quality">क्वालिटी अपग्रेड हो रही है</string>

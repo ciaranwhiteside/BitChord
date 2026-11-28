@@ -120,6 +120,13 @@
     <string name="shuffle_on">Bật trộn bài</string>
     <string name="stereo">Stereo</string>
     <string name="translate_lyrics">Translate lyrics</string>
+    <string name="karaoke_start">Hát theo: giảm giọng hát</string>
+    <string name="karaoke_stop">Dừng hát theo</string>
+    <string name="karaoke_preparing">Đang chuẩn bị giọng hát</string>
+    <string name="karaoke_vocal_level">Mức giọng hát</string>
+    <string name="karaoke_not_on_output">Karaoke không thể thay đổi âm thanh trên đầu ra này</string>
+    <string name="karaoke_failed">Karaoke không thể đọc bài hát này</string>
+    <string name="karaoke_mix_paused">Automix và chuyển bài mượt tạm dừng khi bạn hát</string>
     <string name="translating_lyrics_to">Translating to %1$s…</string>
     <string name="up_next">Tiếp theo</string>
     <string name="upgrading_quality">Đang nâng cấp chất lượng</string>

@@ -120,6 +120,13 @@
     <string name="shuffle_on">隨機播放已開啟</string>
     <string name="stereo">立體聲</string>
     <string name="translate_lyrics">翻譯歌詞</string>
+    <string name="karaoke_start">跟唱：調低人聲</string>
+    <string name="karaoke_stop">停止跟唱</string>
+    <string name="karaoke_preparing">正在準備人聲</string>
+    <string name="karaoke_vocal_level">人聲音量</string>
+    <string name="karaoke_not_on_output">卡拉 OK 無法變更此輸出的音訊</string>
+    <string name="karaoke_failed">卡拉 OK 無法讀取這首歌</string>
+    <string name="karaoke_mix_paused">唱歌時自動混音和交叉淡入淡出會暫停</string>
     <string name="translating_lyrics_to">正在翻譯為%1$s…</string>
     <string name="up_next">接下來播放</string>
     <string name="upgrading_quality">正在升級音質</string>

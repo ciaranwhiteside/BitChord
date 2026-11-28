@@ -123,6 +123,13 @@
     <string name="shuffle_on">셔플 켬</string>
     <string name="stereo">스테레오</string>
     <string name="translate_lyrics">가사 번역</string>
+    <string name="karaoke_start">따라 부르기: 보컬 줄이기</string>
+    <string name="karaoke_stop">따라 부르기 중지</string>
+    <string name="karaoke_preparing">보컬 준비 중</string>
+    <string name="karaoke_vocal_level">보컬 볼륨</string>
+    <string name="karaoke_not_on_output">이 출력에서는 노래방 기능이 오디오를 바꿀 수 없습니다</string>
+    <string name="karaoke_failed">노래방 기능이 이 곡을 읽지 못했습니다</string>
+    <string name="karaoke_mix_paused">노래하는 동안 자동 믹스와 크로스페이드가 일시 중지됩니다</string>
     <string name="translating_lyrics_to">%1$s 번역 중…</string>
     <string name="up_next">다음 곡</string>
     <string name="upgrading_quality">음질 업그레이드 중</string>

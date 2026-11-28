@@ -120,6 +120,13 @@
     <string name="shuffle_on">Zufallswiedergabe an</string>
     <string name="stereo">Stereo</string>
     <string name="translate_lyrics">Songtext übersetzen</string>
+    <string name="karaoke_start">Mitsingen: Gesang leiser stellen</string>
+    <string name="karaoke_stop">Mitsingen beenden</string>
+    <string name="karaoke_preparing">Gesang wird vorbereitet</string>
+    <string name="karaoke_vocal_level">Gesangslautstärke</string>
+    <string name="karaoke_not_on_output">Karaoke kann den Ton dieser Ausgabe nicht ändern</string>
+    <string name="karaoke_failed">Karaoke konnte diesen Song nicht lesen</string>
+    <string name="karaoke_mix_paused">Automix und Überblendung pausieren, während du singst</string>
     <string name="translating_lyrics_to">Wird ins %1$s übersetzt…</string>
     <string name="up_next">Als Nächstes</string>
     <string name="upgrading_quality">Qualität wird hochgestuft</string>

@@ -120,6 +120,13 @@
     <string name="shuffle_on">Casuale attivo</string>
     <string name="stereo">Stereo</string>
     <string name="translate_lyrics">Traduci testo</string>
+    <string name="karaoke_start">Canta: abbassa la voce</string>
+    <string name="karaoke_stop">Smetti di cantare</string>
+    <string name="karaoke_preparing">Preparazione della voce</string>
+    <string name="karaoke_vocal_level">Livello della voce</string>
+    <string name="karaoke_not_on_output">Il karaoke non può modificare l’audio su questa uscita</string>
+    <string name="karaoke_failed">Il karaoke non è riuscito a leggere questo brano</string>
+    <string name="karaoke_mix_paused">Automix e la dissolvenza incrociata sono in pausa mentre canti</string>
     <string name="translating_lyrics_to">Traduzione in %1$s…</string>
     <string name="up_next">In arrivo</string>
     <string name="upgrading_quality">Aggiornamento qualità</string>
