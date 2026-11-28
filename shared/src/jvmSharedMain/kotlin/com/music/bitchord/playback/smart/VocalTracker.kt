@@ -151,7 +151,44 @@ class VocalTracker(
      * cover a transition overlap plus padding. Shorter input is zero-padded; longer is refused
      * rather than chunked, because a transition never needs more than one window.
      */
-    fun track(left: FloatArray, right: FloatArray, rate: Double): FloatArray? {
+    fun track(left: FloatArray, right: FloatArray, rate: Double): FloatArray? =
+        infer(left, right, rate, ::reduceToBandCurve)
+
+    /**
+     * The whole per-bin vocal mask for one window, for Karaoke, or null when unavailable.
+     * Same window limit as [track]; frame `f` is centred on sample `f * hop` of the window
+     * at the model's rate.
+     */
+    fun mask(left: FloatArray, right: FloatArray, rate: Double): VocalMask? =
+        infer(left, right, rate) { mix, target, bins, frames ->
+            val values = ByteArray(VocalSpectrogram.CHANNELS * bins * frames)
+            for (row in 0 until VocalSpectrogram.CHANNELS * bins) {
+                for (frame in 0 until frames) {
+                    val index = row * FIXED_FRAMES + frame
+                    val share = target.get(index).let { t -> mix.get(index).let { m -> if (m > 1e-6f) (t / m).coerceIn(0f, 1f) else 0f } }
+                    values[row * frames + frame] = (share * 255f + 0.5f).toInt().toByte()
+                }
+            }
+            VocalMask(values, frames, bins)
+        }
+
+    /**
+     * 8 bits a cell (0 none of the bin is voice, 255 all of it), `[channel][bin][frame]` over
+     * the window's real frames only: a whole-track mask is held a window or two at a time,
+     * and float32 would be four times the memory for precision no ear can hear.
+     */
+    class VocalMask(val values: ByteArray, val frames: Int, val bins: Int) {
+        fun at(channel: Int, bin: Int, frame: Int): Float =
+            (values[(channel * bins + bin) * frames + frame].toInt() and 0xFF) / 255f
+    }
+
+    /** Spectrogram, one inference, then [read] over the mix and the model's output. */
+    private fun <T> infer(
+        left: FloatArray,
+        right: FloatArray,
+        rate: Double,
+        read: (mix: FloatBuffer, target: FloatBuffer, bins: Int, frames: Int) -> T,
+    ): T? {
         if (!VocalSpectrogram.available) return null
         val resampledLeft = MelSpectrogram.resample(left, rate, VocalSpectrogram.sampleRate) ?: return null
         val resampledRight = MelSpectrogram.resample(right, rate, VocalSpectrogram.sampleRate) ?: return null
@@ -192,11 +229,11 @@ class VocalTracker(
                     // per call — when the only thing read from it is a band
                     // average.
                     val target = (outputs.get(0) as OnnxTensor).floatBuffer
-                    val curve = reduceToBandCurve(backing.asFloatBuffer(), target, bins, spectrogram.frames)
+                    val result = read(backing.asFloatBuffer(), target, bins, spectrogram.frames)
                     AnalysisLog.warn("vocal mask ${spectrogram.frames} frames in " +
                             "${System.currentTimeMillis() - started}ms",
                     )
-                    curve
+                    result
                 }
             }
         }.onFailure { AnalysisLog.warn("Vocal inference failed", it) }.getOrNull()
