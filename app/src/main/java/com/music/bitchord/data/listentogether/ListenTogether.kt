@@ -1696,10 +1696,15 @@ object ListenTogether {
      * on screen. Rejoining is authenticated with it: the server no longer hands
      * a membership to whoever presents its device id.
      */
-    private fun storedTokenFor(code: String): String? =
-        readStoredToken()?.takeIf {
-            it.isNotBlank() && prefs.getString(KEY_CODE, null) == code
-        }
+    private fun storedTokenFor(code: String): String? {
+        if (prefs.getString(KEY_CODE, null) != code) return null
+        // The live membership's token first. Where the Keystore is unusable
+        // the token is deliberately never persisted, so reading storage alone
+        // would rejoin the party this device is in with no credential and be
+        // refused (401 rejoin_denied) while the valid token sits in memory.
+        return token?.takeIf { it.isNotBlank() }
+            ?: readStoredToken()?.takeIf { it.isNotBlank() }
+    }
 
     private suspend fun post(
         url: String,
