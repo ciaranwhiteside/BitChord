@@ -120,6 +120,16 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
         override fun setLastPlayerScreen(value: LastPlayerScreen) = AppSettings.setLastPlayerScreen(value)
         override fun setLyricsOffsetMs(value: Int) = AppSettings.setLyricsOffsetMs(value)
+        override val karaokeEnabled get() = AppSettings.karaokeEnabled
+        override val karaokeVocalLevel get() = AppSettings.karaokeVocalLevel
+        override val karaokeStatus get() = AppSettings.karaokeStatus
+        override fun setKaraokeEnabled(on: Boolean) {
+            AppSettings.karaokeEnabled.value = on
+        }
+        override fun setKaraokeVocalLevel(value: Float) = AppSettings.setKaraokeVocalLevel(value)
+        override fun setKaraokeSingableTrack(mediaId: String?) {
+            AppSettings.karaokeSingableTrack.value = mediaId
+        }
         override fun setMixViewOpen(open: Boolean) {
             AppSettings.mixViewOpen.value = open
         }

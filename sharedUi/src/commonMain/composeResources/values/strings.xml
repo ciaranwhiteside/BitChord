@@ -126,6 +126,13 @@
     <string name="shuffle_on">Shuffle on</string>
     <string name="stereo">Stereo</string>
     <string name="translate_lyrics">Translate lyrics</string>
+    <string name="karaoke_start">Sing along: turn the vocals down</string>
+    <string name="karaoke_stop">Stop singing along</string>
+    <string name="karaoke_preparing">Getting the vocals ready</string>
+    <string name="karaoke_vocal_level">Vocal level</string>
+    <string name="karaoke_not_on_output">Karaoke can’t change audio on this output</string>
+    <string name="karaoke_failed">Karaoke couldn’t read this song</string>
+    <string name="karaoke_mix_paused">Automix and crossfade are paused while you sing</string>
     <string name="translating_lyrics_to">Translating to %1$s…</string>
     <string name="up_next">Up next</string>
     <string name="upgrading_quality">Upgrading quality</string>

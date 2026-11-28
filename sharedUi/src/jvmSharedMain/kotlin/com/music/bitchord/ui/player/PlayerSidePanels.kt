@@ -20,6 +20,11 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import org.jetbrains.compose.resources.stringArrayResource
 import org.jetbrains.compose.resources.stringResource
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 
 // The player's lyrics and queue, standing on their own outside it: what a
 // window shows in a column beside the page, the way Apple Music's sidebar
@@ -89,12 +94,16 @@ fun LyricsSidePanel(
                     )
                 },
                 translationToggle = {
-                    TranslationToggleButton(
-                        state = lyricsTranslation.translationState,
-                        showingTranslation = lyricsTranslation.showingTranslation,
-                        enabled = !lyrics.isNullOrEmpty(),
-                        onClick = lyricsTranslation.toggleTranslation,
-                    )
+                    Row(verticalAlignment = Alignment.Top) {
+                        KaraokeControl(lyrics)
+                        Spacer(Modifier.width(8.dp))
+                        TranslationToggleButton(
+                            state = lyricsTranslation.translationState,
+                            showingTranslation = lyricsTranslation.showingTranslation,
+                            enabled = !lyrics.isNullOrEmpty(),
+                            onClick = lyricsTranslation.toggleTranslation,
+                        )
+                    }
                 },
             ) { panelModifier ->
                 LyricsTranslationMotion(

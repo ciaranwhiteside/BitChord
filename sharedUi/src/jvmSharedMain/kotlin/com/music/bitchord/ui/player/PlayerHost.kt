@@ -320,8 +320,18 @@ interface PlayerSettingsSource {
     val translationLanguage: StateFlow<String>
     val versionAlignmentInProgress: StateFlow<Boolean>
 
+    /** Karaoke, for this session only (SPEC.md). */
+    val karaokeEnabled: StateFlow<Boolean>
+    /** The original vocal's level under Karaoke, 0..1, kept across launches. */
+    val karaokeVocalLevel: StateFlow<Float>
+    val karaokeStatus: StateFlow<KaraokeStatus>
+
     fun setLastPlayerScreen(value: LastPlayerScreen)
     fun setLyricsOffsetMs(value: Int)
+    fun setKaraokeEnabled(on: Boolean)
+    fun setKaraokeVocalLevel(value: Float)
+    /** The track the lyrics view found word-timed lyrics for, or null: the only one Karaoke cuts. */
+    fun setKaraokeSingableTrack(mediaId: String?)
     /** Whether the mix popup is up, so the host lays out [smartMixPreview] for it. */
     fun setMixViewOpen(open: Boolean)
 }

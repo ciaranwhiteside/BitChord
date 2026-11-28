@@ -185,6 +185,7 @@ import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import com.music.bitchord.data.lyrics.canSing
 
 
 /** Collapsed-header geometry, shared by the layout and its animation. */
@@ -1186,6 +1187,10 @@ fun NowPlayingScreen(
     val queueSelection = remember { QueueSelectionState() }
     LaunchedEffect(queueOpen, controlsLocked) {
         if (!queueOpen || controlsLocked) queueSelection.clear()
+    }
+    // Karaoke cuts only a track whose lyrics are timed word by word; the service hears which.
+    LaunchedEffect(song.videoId, lyrics) {
+        PlayerSettings.setKaraokeSingableTrack(song.videoId.takeIf { lyrics.orEmpty().canSing })
     }
     var lyricsOpen by remember {
         mutableStateOf(restoredPlayerScreen == LastPlayerScreen.LYRICS)
@@ -2637,12 +2642,16 @@ fun NowPlayingScreen(
                                 )
                             },
                             translationToggle = {
-                                TranslationToggleButton(
-                                    state = lyricsTranslation.translationState,
-                                    showingTranslation = lyricsTranslation.showingTranslation,
-                                    enabled = !lyrics.isNullOrEmpty(),
-                                    onClick = lyricsTranslation.toggleTranslation,
-                                )
+                                Row(verticalAlignment = Alignment.Top) {
+                                    KaraokeControl(lyrics)
+                                    Spacer(Modifier.width(8.dp))
+                                    TranslationToggleButton(
+                                        state = lyricsTranslation.translationState,
+                                        showingTranslation = lyricsTranslation.showingTranslation,
+                                        enabled = !lyrics.isNullOrEmpty(),
+                                        onClick = lyricsTranslation.toggleTranslation,
+                                    )
+                                }
                             },
                         ) { panelModifier ->
                             LyricsTranslationMotion(
@@ -4402,14 +4411,18 @@ fun NowPlayingScreen(
                                         .align(Alignment.BottomEnd)
                                         .graphicsLayer { alpha = translateFade },
                                 ) {
-                                    TranslationToggleButton(
-                                        state = lyricsTranslation.translationState,
-                                        showingTranslation = lyricsTranslation.showingTranslation,
-                                        // Not tappable on the way out: a disc at 20%
-                                        // opacity is on its way to gone, not a target.
-                                        enabled = translateShown && !lyrics.isNullOrEmpty(),
-                                        onClick = lyricsTranslation.toggleTranslation,
-                                    )
+                                    Row(verticalAlignment = Alignment.Top) {
+                                        KaraokeControl(lyrics, enabled = translateShown)
+                                        Spacer(Modifier.width(8.dp))
+                                        TranslationToggleButton(
+                                            state = lyricsTranslation.translationState,
+                                            showingTranslation = lyricsTranslation.showingTranslation,
+                                            // Not tappable on the way out: a disc at 20%
+                                            // opacity is on its way to gone, not a target.
+                                            enabled = translateShown && !lyrics.isNullOrEmpty(),
+                                            onClick = lyricsTranslation.toggleTranslation,
+                                        )
+                                    }
                                 }
                             }
                             // The bar arrives and leaves without a transition of its own:
