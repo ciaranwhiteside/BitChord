@@ -3682,7 +3682,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun switchAccount(targetAccountId: String) {
         if (targetAccountId.isBlank() || targetAccountId == _activeAccountId.value) return
-        if (authStore.sessions.none { it.accountId == targetAccountId }) return
+        val target = authStore.sessions.firstOrNull { it.accountId == targetAccountId } ?: return
+        // Checked before anything is detached: finding out there is no profile
+        // to activate only after A's party, listener state and Google cookies
+        // are gone would leave A half torn down and the journal replaying a
+        // switch that can never complete.
+        if (target.profiles.isEmpty()) return
         viewModelScope.launch {
             _accountSwitching.value = true
             val from = _activeAccountId.value
@@ -3733,6 +3738,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun recoverPendingAccountTransition() {
         val transition = authStore.pendingTransition() ?: return
+        // Died after the target was activated but before the journal was
+        // cleared: the switch is done. Without this, switchAccount(target)
+        // returns early (already active) and the journal replays every launch.
+        if (com.music.bitchord.auth.AccountTransitionRules.shouldClear(transition, _activeAccountId.value)) {
+            authStore.clearTransition()
+            return
+        }
         val available = authStore.sessions.map { it.accountId }.toSet()
         viewModelScope.launch {
             when {

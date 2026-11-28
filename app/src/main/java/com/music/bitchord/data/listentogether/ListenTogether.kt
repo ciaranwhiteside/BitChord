@@ -1586,17 +1586,33 @@ object ListenTogether {
      * and is backup-excluded; losing it only gives the party a new pseudonym.
      */
     private fun pseudonymSecret(): String? {
-        val secure = EncryptedPrefs.openSecure(appContext, SECRET_PREFS) ?: return null
-        return PartySecretStore(
-            readSecure = { secure.getString(KEY_PSEUDONYM_SECRET, null) },
-            writeSecureVerified = { value ->
-                secure.edit().putString(KEY_PSEUDONYM_SECRET, value).commit() &&
-                    secure.getString(KEY_PSEUDONYM_SECRET, null) == value
-            },
-            readLegacy = { prefs.getString(KEY_PSEUDONYM_SECRET, null) },
-            removeLegacy = { prefs.edit().remove(KEY_PSEUDONYM_SECRET).apply() },
-        ).secretOrNull()
+        cachedPseudonymSecret?.let { return it }
+        // Serialised: canJoin()/myAvatarUrl() run on the UI thread while a
+        // create or join runs on IO. Two first-ever calls racing would each
+        // generate and commit their own key, and the loser's caller would
+        // build an identity from a key that was immediately overwritten — a
+        // host who created a party under pseudonym A, then rejoins as B.
+        // Cached once verified: every identity() reopening the encrypted
+        // store was a Keystore round trip, some of them during composition.
+        return synchronized(pseudonymSecretLock) {
+            cachedPseudonymSecret ?: run {
+                val secure = EncryptedPrefs.openSecure(appContext, SECRET_PREFS) ?: return@run null
+                PartySecretStore(
+                    readSecure = { secure.getString(KEY_PSEUDONYM_SECRET, null) },
+                    writeSecureVerified = { value ->
+                        secure.edit().putString(KEY_PSEUDONYM_SECRET, value).commit() &&
+                            secure.getString(KEY_PSEUDONYM_SECRET, null) == value
+                    },
+                    readLegacy = { prefs.getString(KEY_PSEUDONYM_SECRET, null) },
+                    removeLegacy = { prefs.edit().remove(KEY_PSEUDONYM_SECRET).apply() },
+                ).secretOrNull()
+            }?.also { cachedPseudonymSecret = it }
+        }
     }
+
+    /** Verified pseudonym key; null until first read, and never cached as a failure. */
+    @Volatile private var cachedPseudonymSecret: String? = null
+    private val pseudonymSecretLock = Any()
 
     private fun recordActivity(entry: PartyActivity) {
         val next = (listOf(entry) + _activity.value).take(100)

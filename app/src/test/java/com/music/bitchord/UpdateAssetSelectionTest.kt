@@ -41,4 +41,12 @@ class UpdateAssetSelectionTest {
         assertEquals("BitChord-v1.9.1_arm64-v8a.apk", asset?.name)
         assertNull(AppUpdateChecker.selectUpdateApk(release, emptyList(), "NoSuchPrefix-"))
     }
+
+    @Test
+    fun `a different or unreadable package is refused, never thrown`() {
+        assertEquals(true, AppUpdateChecker.isExpectedPackage("com.music.bitchord", "com.music.bitchord"))
+        // A dev build offered the release APK.
+        assertEquals(false, AppUpdateChecker.isExpectedPackage("com.music.bitchord", "com.dev.bitchord"))
+        assertEquals(false, AppUpdateChecker.isExpectedPackage(null, "com.music.bitchord"))
+    }
 }
