@@ -644,6 +644,8 @@ if (import.meta.env.DEV) {
     __bcPlayer: usePlayer,
     // AutoMix's analysis self-test: expect BPM ≈ 123.93 and Camelot 8A.
     __automixSelfTest: () => import('@/playback/automix/analysis/selftest').then((m) => m.analysisSelfTest()),
+    // Karaoke's perf gate: the mask's speed on a song, and its cut to listen to.
+    __karaokeBench: (videoId: string) => import('@/playback/karaoke/bench').then((m) => m.karaokeBench(videoId)),
   });
 }
 

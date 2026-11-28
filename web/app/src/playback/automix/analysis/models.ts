@@ -321,6 +321,54 @@ let vocalSession: Promise<ort.InferenceSession | null> | null = null;
  * VOCAL_WINDOW_SEC) is, 0–1: the model's vocal mask averaged over 200 Hz–4 kHz.
  */
 export async function vocalCurve(left: Float32Array, right: Float32Array): Promise<Float32Array | null> {
+  const run = await vocalRun(left, right);
+  if (!run) return null;
+  const { input, target, frames } = run;
+  const lowBin = Math.max(0, Math.floor((200 * VOCAL_FFT) / VOCAL_SR));
+  const highBin = Math.min(VOCAL_BINS - 1, Math.ceil((4000 * VOCAL_FFT) / VOCAL_SR));
+  const curve = new Float32Array(frames);
+  for (let f = 0; f < frames; f++) {
+    let sum = 0;
+    let count = 0;
+    for (let c = 0; c < 2; c++) {
+      for (let b = lowBin; b <= highBin; b++) {
+        const i = (c * VOCAL_BINS + b) * VOCAL_FRAMES + f;
+        const mix = input[i]!;
+        if (mix <= 1e-6) continue;
+        sum += Math.max(0, Math.min(1, target[i]! / mix));
+        count++;
+      }
+    }
+    curve[f] = count ? sum / count : 0;
+  }
+  return curve;
+}
+
+/**
+ * Karaoke's whole per-bin mask for one window (VocalTracker.mask): 8 bits a cell, 255 all
+ * voice, `[channel][bin][frame]` over the window's real frames. Frame f is centred on
+ * sample f * 1024 of the window.
+ */
+export async function vocalMask(
+  left: Float32Array,
+  right: Float32Array,
+): Promise<{ values: Uint8Array; frames: number } | null> {
+  const run = await vocalRun(left, right);
+  if (!run) return null;
+  const { input, target, frames } = run;
+  const values = new Uint8Array(2 * VOCAL_BINS * frames);
+  for (let row = 0; row < 2 * VOCAL_BINS; row++) {
+    for (let f = 0; f < frames; f++) {
+      const i = row * VOCAL_FRAMES + f;
+      const mix = input[i]!;
+      values[row * frames + f] = Math.round((mix > 1e-6 ? Math.min(1, Math.max(0, target[i]! / mix)) : 0) * 255);
+    }
+  }
+  return { values, frames };
+}
+
+/** The spectrogram and one inference: the mix's magnitudes and the model's vocal estimate. */
+async function vocalRun(left: Float32Array, right: Float32Array) {
   const pad = VOCAL_FFT / 2;
   if (left.length <= pad + 1 || left.length !== right.length) return null;
   const frames = Math.floor((left.length + 2 * pad - VOCAL_FFT) / VOCAL_HOP) + 1;
@@ -348,25 +396,7 @@ export async function vocalCurve(left: Float32Array, right: Float32Array): Promi
   });
 
   const out = await s.run({ [s.inputNames[0]!]: new ort.Tensor('float32', input, [1, 2, VOCAL_BINS, VOCAL_FRAMES]) });
-  const target = out[s.outputNames[0]!]!.data as Float32Array;
-  const lowBin = Math.max(0, Math.floor((200 * VOCAL_FFT) / VOCAL_SR));
-  const highBin = Math.min(VOCAL_BINS - 1, Math.ceil((4000 * VOCAL_FFT) / VOCAL_SR));
-  const curve = new Float32Array(frames);
-  for (let f = 0; f < frames; f++) {
-    let sum = 0;
-    let count = 0;
-    for (let c = 0; c < 2; c++) {
-      for (let b = lowBin; b <= highBin; b++) {
-        const i = (c * VOCAL_BINS + b) * VOCAL_FRAMES + f;
-        const mix = input[i]!;
-        if (mix <= 1e-6) continue;
-        sum += Math.max(0, Math.min(1, target[i]! / mix));
-        count++;
-      }
-    }
-    curve[f] = count ? sum / count : 0;
-  }
-  return curve;
+  return { input, target: out[s.outputNames[0]!]!.data as Float32Array, frames };
 }
 
 /** Dev: the raw model run over the first chunk of [pcm], for checking the front end against the phone. */
