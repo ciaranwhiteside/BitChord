@@ -48,6 +48,9 @@ const SERVO_MS = 40;
  */
 export class Deck {
   readonly eq: ThreeBandEQ;
+  /** BitChord: the element's own output, so a stage can sit between it and the EQ. */
+  private readonly source: MediaElementAudioSourceNode;
+  private insert: AudioNode | null = null;
   readonly gain: GainNode;
   /** The player's plain-crossfade share and nothing else; AutoMix never touches it. */
   readonly fader: GainNode;
@@ -86,9 +89,20 @@ export class Deck {
       highpass: new BiquadFilterNode(ctx, { type: 'highpass', frequency: 20, Q: 0.7 }),
       lowpass: new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 20000, Q: 0.7 }),
     };
-    ctx.createMediaElementSource(audio).connect(this.eq.input);
+    this.source = ctx.createMediaElementSource(audio);
+    this.source.connect(this.eq.input);
     this.eq.output.connect(this.sweep.highpass).connect(this.sweep.lowpass).connect(this.gain).connect(this.fader).connect(destination);
     audio.preservesPitch = true;
+  }
+
+  /** BitChord: puts [node] (Karaoke's cut) between the element and the EQ, or takes it out with null. */
+  setInsert(node: AudioNode | null): void {
+    if (node === this.insert) return;
+    this.source.disconnect();
+    this.insert?.disconnect();
+    this.insert = node;
+    if (node) this.source.connect(node).connect(this.eq.input);
+    else this.source.connect(this.eq.input);
   }
 
   get durationSec(): number {

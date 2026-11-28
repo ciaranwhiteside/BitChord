@@ -20,6 +20,7 @@ import {
   type QueueEntry,
   type QueueSource,
 } from '@/playback/queue/timeline';
+import { useKaraoke } from '@/playback/karaoke/store';
 import { trackLog } from '@/playback/trackLog';
 import type { LoadedTrack, StreamStats, YouTubeEngine } from '@/playback/youtube/engine';
 import type { AutomixGraph, AutoDJSnapshot } from '@/playback/automix';
@@ -166,7 +167,8 @@ export function getPlayhead(): { sec: number; paused: boolean } | null {
     const sec = graph.dj.mixPlayhead(nowPlaying.videoId);
     if (sec !== null) return { sec, paused: false };
   }
-  return audio ? { sec: audio.currentTime, paused: audio.paused } : null;
+  // Karaoke's cut holds the sound back a fixed amount: the lyrics follow what is heard.
+  return audio ? { sec: Math.max(0, audio.currentTime - useKaraoke.getState().latencySec), paused: audio.paused } : null;
 }
 
 /** The running Automix blend's beat (phase 0 on the beat), for the seek bar's pulse; null between blends. */
@@ -253,6 +255,8 @@ function ensureAutomix(): Promise<AutomixGraph | null> {
         current: () => {
           // A party doesn't mix: every member would blend on their own clock (the phone stops too).
           if (partyHooks?.inParty()) return null;
+          // Nor under Karaoke: the cut runs on the front deck only (the setting stays as it is).
+          if (useKaraoke.getState().on) return null;
           const { queue, index, status } = usePlayer.getState();
           const entry = queue[index];
           return entry && status === 'playing' ? queued(entry) : null;
@@ -351,6 +355,29 @@ function automixHandoff() {
   afterTrackStarted();
   intent();
 }
+
+/**
+ * The front deck's place in the Web Audio graph, for Karaoke's cut; builds the graph if
+ * Automix never has. Null before the first play.
+ */
+export async function karaokeRoute() {
+  const g = await ensureAutomix();
+  if (!g || !decks) return null;
+  void g.ctx.resume();
+  return { ctx: g.ctx, deck: g.decks[active]!, audio: decks[active]!.audio };
+}
+
+// Karaoke's session (playback/karaoke) loads the first time it is turned on.
+let stopKaraoke: (() => void) | null = null;
+useKaraoke.subscribe((state, before) => {
+  if (state.on === before.on) return;
+  stopKaraoke?.();
+  stopKaraoke = null;
+  if (!state.on) return;
+  void import('@/playback/karaoke/session').then(({ startKaraoke }) => {
+    if (useKaraoke.getState().on && !stopKaraoke) stopKaraoke = startKaraoke();
+  });
+});
 
 /** Starts or stops the mix loop to match the setting; the first start builds the graph. */
 function syncAutomix() {
@@ -901,6 +928,8 @@ function cancelCrossfade() {
 function maybeCrossfade() {
   const state = usePlayer.getState();
   if (!decks || fade || state.automix || !state.crossfadeSec || state.status !== 'playing') return;
+  // Karaoke cuts the front deck only, so tracks change with a straight cut while it is on.
+  if (useKaraoke.getState().on) return;
   const front = decks[active]!;
   const remaining = front.audio.duration - front.audio.currentTime;
   if (!Number.isFinite(remaining) || remaining > state.crossfadeSec || remaining < 1) return;
