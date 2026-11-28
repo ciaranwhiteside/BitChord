@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.music.bitchord.data.TrackLog
+import com.music.bitchord.data.web.QuietWebChromeClient
 
 /**
  * Reads the token out of a completed login by dropping an iframe into the page
@@ -244,7 +245,7 @@ fun DiscordLoginScreen(
                     }
                 }
 
-                webChromeClient = object : WebChromeClient() {
+                webChromeClient = object : QuietWebChromeClient() {
                     override fun onJsAlert(
                         view: WebView,
                         url: String,

@@ -28,6 +28,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.Base64
+import com.music.bitchord.data.web.QuietWebChromeClient
 
 /**
  * The bearer token behind Spotify's own web player, minted from the
@@ -162,7 +163,10 @@ object SpotifyToken {
             SPOTIFY_ORIGINS.forEach { storage.deleteOrigin(it) }
         }
 
-        var pageUrl: String? = null
+        // Written by the WebView client on the UI thread, read by the bridge on
+        // WebView's JavaBridge thread: an AtomicReference, so the origin check
+        // never sees a stale URL.
+        val pageUrl = java.util.concurrent.atomic.AtomicReference<String?>(null)
         var webView: WebView? = null
         return try {
             webView = WebView(context).apply {
@@ -170,7 +174,8 @@ object SpotifyToken {
                 settings.domStorageEnabled = true
                 settings.userAgentString = CANVAS_UA
                 cookieManager.setAcceptThirdPartyCookies(this, true)
-                addJavascriptInterface(TokenBridge(deferred) { pageUrl }, BRIDGE_NAME)
+                addJavascriptInterface(TokenBridge(deferred) { pageUrl.get() }, BRIDGE_NAME)
+                webChromeClient = QuietWebChromeClient()
 
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
@@ -178,13 +183,13 @@ object SpotifyToken {
 
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
-                        pageUrl = url
+                        pageUrl.set(url)
                         view.evaluateJavascript(HOOK_SCRIPT, null)
                     }
 
                     override fun onPageFinished(view: WebView, url: String?) {
                         super.onPageFinished(view, url)
-                        pageUrl = url
+                        pageUrl.set(url)
                         // Re-assert in case the player navigated client-side
                         // after the onPageStarted injection ran.
                         view.evaluateJavascript(HOOK_SCRIPT, null)

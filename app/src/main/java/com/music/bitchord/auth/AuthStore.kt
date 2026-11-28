@@ -117,26 +117,22 @@ class AuthStore(context: Context) {
         get() = prefs.getString(KEY_DISCORD_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_DISCORD_TOKEN, value).apply()
 
-    /** Spotify web-player cookie; a full-account bearer in everything but name. */
-    var spotifySpdcToken: String?
-        get() = prefs.getString(KEY_SPOTIFY_SPDC, null)
-        set(value) = prefs.edit().putString(KEY_SPOTIFY_SPDC, value).apply()
+    /**
+     * A credential that belongs to a setting: a scrobbler session key, the
+     * Spotify session cookie, a lyrics API key. Kept here, beside the other
+     * credentials, rather than in the settings file — that file goes into
+     * Android's Auto Backup, and this one never does. Prefixed so a settings
+     * key can never collide with one of this store's own.
+     */
+    fun settingSecret(key: String): String? = prefs.getString(SETTING_PREFIX + key, null)
 
-    var lastfmSessionKey: String?
-        get() = prefs.getString(KEY_LASTFM_SESSION, null)
-        set(value) = prefs.edit().putString(KEY_LASTFM_SESSION, value).apply()
+    fun setSettingSecret(key: String, value: String?) {
+        prefs.edit().apply {
+            if (value.isNullOrEmpty()) remove(SETTING_PREFIX + key) else putString(SETTING_PREFIX + key, value)
+        }.apply()
+    }
 
-    var lastfmApiKey: String?
-        get() = prefs.getString(KEY_LASTFM_API_KEY, null)
-        set(value) = prefs.edit().putString(KEY_LASTFM_API_KEY, value).apply()
-
-    var lastfmSecret: String?
-        get() = prefs.getString(KEY_LASTFM_SECRET, null)
-        set(value) = prefs.edit().putString(KEY_LASTFM_SECRET, value).apply()
-
-    var listenBrainzToken: String?
-        get() = prefs.getString(KEY_LISTENBRAINZ_TOKEN, null)
-        set(value) = prefs.edit().putString(KEY_LISTENBRAINZ_TOKEN, value).apply()
+    fun hasSettingSecret(key: String): Boolean = prefs.contains(SETTING_PREFIX + key)
 
     /**
      * The WebDAV server password. Encrypted like every other credential here:
@@ -289,10 +285,6 @@ class AuthStore(context: Context) {
         private const val KEY_DISCORD_TOKEN = "discord_token"
         private const val KEY_WEBDAV_PASSWORD = "webdav_password"
         private const val KEY_SMB_PASSWORD = "smb_password"
-        private const val KEY_SPOTIFY_SPDC = "spotify_spdc"
-        private const val KEY_LASTFM_SESSION = "lastfm_session_key"
-        private const val KEY_LASTFM_API_KEY = "lastfm_api_key"
-        private const val KEY_LASTFM_SECRET = "lastfm_secret"
-        private const val KEY_LISTENBRAINZ_TOKEN = "listenbrainz_token"
+        private const val SETTING_PREFIX = "setting."
     }
 }
