@@ -33,6 +33,13 @@ internal data class PendingDownload(
     val sourceHiRes: Boolean = false,
     val from: String? = null,
     val enqueuedAt: Long = 0L,
+    /**
+     * TrackMatcher.targetOf reads it to pick the explicit or the clean cut when
+     * a download is matched on another source; without it a download resumed
+     * after process death could come back as the radio edit. Defaulted, so a
+     * journal written before this field still decodes.
+     */
+    val isExplicit: Boolean? = null,
 ) {
     fun toSong(): Song = Song(
         videoId = videoId,
@@ -45,6 +52,7 @@ internal data class PendingDownload(
         isVideo = isVideo,
         sourceQuality = sourceQuality,
         sourceHiRes = sourceHiRes,
+        isExplicit = isExplicit,
     )
 
     companion object {
@@ -61,6 +69,7 @@ internal data class PendingDownload(
             sourceHiRes = song.sourceHiRes,
             from = from,
             enqueuedAt = enqueuedAt,
+            isExplicit = song.isExplicit,
         )
     }
 }

@@ -2,6 +2,7 @@ package com.music.bitchord.download
 
 import com.music.bitchord.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,5 +58,33 @@ class PendingDownloadTest {
         val jobs = linkedMapOf("a" to PendingDownload.from(song("a"), null))
         val recovered = recoverableDownloads(linkedSetOf("ephemeral"), jobs)
         assertTrue(recovered.isEmpty())
+    }
+
+    @Test
+    fun explicitFlagSurvivesRestartSoTheRightCutIsMatched() {
+        val explicit = song("e").copy(isExplicit = true)
+        val decoded = DownloadJobCodec.decode(DownloadJobCodec.encode(listOf(PendingDownload.from(explicit, null))))
+        assertEquals(true, decoded.single().toSong().isExplicit)
+    }
+
+    @Test
+    fun journalWrittenBeforeTheExplicitFieldStillDecodes() {
+        val old = """[{"videoId":"x","title":"T","artist":"A"}]"""
+        val decoded = DownloadJobCodec.decode(old)
+        assertEquals("x", decoded.single().videoId)
+        assertEquals(null, decoded.single().toSong().isExplicit)
+    }
+
+    @Test
+    fun recoveryStandsDownOnlyWhileThisProcessIsDraining() {
+        val now = 1_000_000L
+        assertTrue(shouldSkipRecovery(serviceAlive = true, requestedAtMs = 0L, nowMs = now))
+        // Asked moments ago: onCreate simply has not run yet.
+        assertTrue(shouldSkipRecovery(serviceAlive = false, requestedAtMs = now - 2_000L, nowMs = now))
+        // A failed or long-past ask never suppresses recovery.
+        assertFalse(shouldSkipRecovery(serviceAlive = false, requestedAtMs = 0L, nowMs = now))
+        assertFalse(
+            shouldSkipRecovery(serviceAlive = false, requestedAtMs = now - SERVICE_START_GRACE_MS, nowMs = now),
+        )
     }
 }

@@ -51,6 +51,7 @@ class DownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Downloads.serviceAlive = true
         createChannel()
         supervisor = DrainSupervisor(
             scope = scope,
@@ -161,6 +162,9 @@ class DownloadService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        // Cleared before onStopped schedules recovery: the worker it starts
+        // must see that nothing in this process is draining any more.
+        Downloads.onServiceGone()
         // Nothing can drain the queue now. Work that has a durable job stays
         // queued so the recovery worker can restart this service; only work
         // with no journal entry is reported as interrupted.

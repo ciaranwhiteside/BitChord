@@ -114,12 +114,33 @@ internal object QuickJsExecutor {
     fun isLoaded(moduleId: String): Boolean =
         synchronized(engineLock) { pools.containsKey(moduleId) }
 
+    /**
+     * The module fetch client. Redirects are *not* followed here: OkHttp's
+     * default would chase a public URL's 302 to `http://192.168.1.1/` (and
+     * downgrade to plain HTTP on the way) before [fetchUrlSync]'s policy check
+     * ever saw it. That loop follows them by hand instead.
+     */
     private val syncHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
             .build()
     }
+
+    /** Remote modules: every resolved address is checked; private ones are refused. */
+    private val remoteModuleClient by lazy {
+        syncHttpClient.newBuilder().dns(SandboxDns(allowPrivate = false)).build()
+    }
+
+    /** Modules served from a private literal or localhost keep LAN access; link-local is still refused. */
+    private val localModuleClient by lazy {
+        syncHttpClient.newBuilder().dns(SandboxDns(allowPrivate = true)).build()
+    }
+
+    private fun clientFor(fetchBase: String): OkHttpClient =
+        if (ModuleSandboxPolicy.baseAllowsPrivate(fetchBase)) localModuleClient else remoteModuleClient
 
     private val engineLock = Any()
 
@@ -561,7 +582,7 @@ internal object QuickJsExecutor {
                 else -> builder.get()
             }
 
-            syncHttpClient.newCall(builder.build()).execute().use { response ->
+            clientFor(fetchBase).newCall(builder.build()).execute().use { response ->
                 if (response.code in 300..399) {
                     val next = response.header("Location")
                         ?.let { response.request.url.resolve(it)?.toString() }

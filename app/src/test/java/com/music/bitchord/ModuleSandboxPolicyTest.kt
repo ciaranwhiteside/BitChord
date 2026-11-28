@@ -1,10 +1,15 @@
 package com.music.bitchord
 
 import com.music.bitchord.data.sources.module.ModuleSandboxPolicy
+import com.music.bitchord.data.sources.module.SandboxDns
+import okhttp3.Dns
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.InetAddress
+import java.net.UnknownHostException
 
 class ModuleSandboxPolicyTest {
 
@@ -49,5 +54,53 @@ class ModuleSandboxPolicyTest {
         assertTrue(ModuleSandboxPolicy.allowsModuleDownload("https://modules.example/a.js"))
         assertFalse(ModuleSandboxPolicy.allowsModuleDownload("http://modules.example/a.js"))
         assertTrue(ModuleSandboxPolicy.allowsModuleDownload("http://127.0.0.1:8080/a.js"))
+    }
+
+    @Test
+    fun `public domains that start like IPv6 prefixes are public`() {
+        val base = "https://modules.example"
+        // fc00::/7 and fe80::/10 are address ranges, not name prefixes.
+        listOf("https://fdroid.org/x", "https://fcc.gov/x", "https://fdic.gov/x", "https://fe80.example/x").forEach {
+            assertTrue(it, ModuleSandboxPolicy.allowsDestination(it, base))
+        }
+        assertFalse(ModuleSandboxPolicy.allowsDestination("https://[fd00::1]/", base))
+        assertFalse(ModuleSandboxPolicy.allowsDestination("https://[fe80::1]/", base))
+    }
+
+    @Test
+    fun `IPv4-mapped and unique-local literals are private`() {
+        assertTrue(ModuleSandboxPolicy.isLocalOrPrivateHost("::ffff:127.0.0.1"))
+        assertTrue(ModuleSandboxPolicy.isLocalOrPrivateHost("[fc00::5]"))
+        assertTrue(ModuleSandboxPolicy.isLocalOrPrivateHost("100.64.1.1"))
+        assertFalse(ModuleSandboxPolicy.isLocalOrPrivateHost("8.8.8.8"))
+    }
+
+    private fun dns(vararg addresses: String) = Dns { _ -> addresses.map { InetAddress.getByName(it) } }
+
+    @Test
+    fun `a public name resolving to the LAN is refused for a remote module`() {
+        // DNS rebinding, or a decimal/hex IP form the string check cannot see.
+        val sandbox = SandboxDns(allowPrivate = false, system = dns("192.168.1.1"))
+        assertThrows(UnknownHostException::class.java) { sandbox.lookup("rebind.attacker.example") }
+        val mixed = SandboxDns(allowPrivate = false, system = dns("93.184.216.34", "127.0.0.1"))
+        assertThrows(UnknownHostException::class.java) { mixed.lookup("rebind.attacker.example") }
+        val public = SandboxDns(allowPrivate = false, system = dns("93.184.216.34"))
+        assertEquals(1, public.lookup("example.com").size)
+    }
+
+    @Test
+    fun `metadata is refused even for a self-hosted module`() {
+        val sandbox = SandboxDns(allowPrivate = true, system = dns("169.254.169.254"))
+        assertThrows(UnknownHostException::class.java) { sandbox.lookup("metadata.internal") }
+        val lan = SandboxDns(allowPrivate = true, system = dns("192.168.1.10"))
+        assertEquals(1, lan.lookup("nas.local").size)
+    }
+
+    @Test
+    fun `only a base written as local may reach private addresses`() {
+        assertTrue(ModuleSandboxPolicy.baseAllowsPrivate("http://192.168.1.10:9000/modules"))
+        assertTrue(ModuleSandboxPolicy.baseAllowsPrivate("http://localhost:8080"))
+        // A public name never earns LAN access, however it resolves.
+        assertFalse(ModuleSandboxPolicy.baseAllowsPrivate("https://modules.example"))
     }
 }

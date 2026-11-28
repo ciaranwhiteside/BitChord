@@ -49,14 +49,14 @@ sealed interface DetectedFormat {
 }
 
 /**
- * Release builds disable Android cleartext traffic, so accepting an `http://`
+ * When this build blocks cleartext (see cleartextPermitted), accepting an `http://`
  * addon would only fail later as a generic "nothing answered". Say what is
- * actually wrong instead. Debug builds keep local HTTP addon development.
+ * actually wrong instead.
  */
 internal fun cleartextAddonRefusal(url: String, cleartextAllowed: Boolean): String? {
     val parsed = url.toHttpUrlOrNull() ?: return null
     if (!cleartextAllowed && parsed.scheme == "http") {
-        return "BitChord requires an HTTPS addon address; plain HTTP is blocked by Android in release builds"
+        return "BitChord requires an HTTPS addon address; plain HTTP is blocked by this build's network policy"
     }
     return null
 }
@@ -99,7 +99,7 @@ object SourceFormats {
                 DetectedFormat.Unsupported("That is not a web address BitChord can open"),
             )
         }
-        cleartextAddonRefusal(url, cleartextAllowed = BuildConfig.DEBUG)?.let { refusal ->
+        cleartextAddonRefusal(url, cleartextAllowed = com.music.bitchord.data.sources.cleartextPermitted(url))?.let { refusal ->
             return@withContext Result.success(DetectedFormat.Unsupported(refusal))
         }
 

@@ -1,5 +1,6 @@
 package com.music.bitchord.download
 
+import android.os.SystemClock
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -181,6 +182,7 @@ object Downloads {
         get() = enqueueScope.coroutineContext[ContinuationInterceptor] as CoroutineDispatcher
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.getSharedPreferences("bitchord_settings", Context.MODE_PRIVATE)
         _saved.value = runCatching {
             json.decodeFromString(serializer, prefs.getString(KEY_SAVED, null) ?: "{}")
@@ -211,11 +213,45 @@ object Downloads {
 
     internal fun hasPersistedJobs(): Boolean = synchronized(lock) { pendingJobs.isNotEmpty() }
 
+    /** Set by [DownloadService] for its lifetime. */
+    @Volatile
+    internal var serviceAlive = false
+
+    /** When this process last asked for the service; 0 when that ask failed. */
+    @Volatile
+    private var serviceStartRequestedAtMs = 0L
+
+    /**
+     * Whether this process is already draining the queue, or has just asked to.
+     *
+     * The recovery worker exists for a queue that outlived its process. Every
+     * enqueue also schedules it (so a death right after a tap is recoverable),
+     * and without this it would promote itself with its own notification and
+     * start the service a second time on every ordinary download.
+     */
+    internal fun serviceDrainingHere(now: Long = SystemClock.elapsedRealtime()): Boolean =
+        shouldSkipRecovery(serviceAlive, serviceStartRequestedAtMs, now)
+
+    /** The service is going away: nothing in this process drains the queue now. */
+    internal fun onServiceGone() {
+        serviceAlive = false
+        serviceStartRequestedAtMs = 0L
+    }
+
+    private var appContext: Context? = null
+
     private fun persistPendingLocked() {
         if (!::prefs.isInitialized) return
         prefs.edit()
             .putString(KEY_PENDING_JOBS, DownloadJobCodec.encode(pendingJobs.values))
             .commit()
+        // Nothing left to recover: stop the 15-minute safety net, or it would
+        // wake the app for the rest of the install after the first download.
+        if (pendingJobs.isEmpty()) {
+            appContext?.let { context ->
+                runCatching { WorkManager.getInstance(context).cancelUniqueWork(RECOVERY_PERIODIC_WORK) }
+            }
+        }
     }
 
     private fun scheduleRecovery(context: Context) {
@@ -303,11 +339,17 @@ object Downloads {
         }
         _active.update { it + (id to DownloadState.Queued) }
         DownloadSession.queued(song, from)
+        // Marked before the recovery work is enqueued, so the worker it starts
+        // sees this process already starting the service (see
+        // [serviceDrainingHere]) instead of racing onCreate with a second,
+        // "Resuming downloads" foreground notification on every tap.
+        serviceStartRequestedAtMs = SystemClock.elapsedRealtime()
         scheduleRecovery(app)
 
         runCatching {
             ContextCompat.startForegroundService(app, Intent(app, DownloadService::class.java))
         }.onFailure {
+            serviceStartRequestedAtMs = 0L
             // Refused only when the app has no window and no exemption, which
             // means the queue has nothing to drain it and would sit there
             // looking accepted forever.
@@ -2018,3 +2060,15 @@ internal fun Throwable.isOutOfSpace(): Boolean {
 /** What to tell the listener about [failure], or null when it is not a storage fault. */
 internal fun storageFailureMessage(failure: Throwable): String? =
     if (failure.isOutOfSpace()) "Not enough free storage to finish this download" else null
+
+/** How long after asking for the service a recovery run still treats it as starting. */
+internal const val SERVICE_START_GRACE_MS = 15_000L
+
+/**
+ * Whether a recovery run should stand down: the service is alive in this
+ * process, or this process asked for it within [SERVICE_START_GRACE_MS] (its
+ * onCreate may simply not have run yet). A failed ask clears the timestamp,
+ * so a refused start never suppresses recovery.
+ */
+internal fun shouldSkipRecovery(serviceAlive: Boolean, requestedAtMs: Long, nowMs: Long): Boolean =
+    serviceAlive || (requestedAtMs > 0L && nowMs - requestedAtMs in 0 until SERVICE_START_GRACE_MS)

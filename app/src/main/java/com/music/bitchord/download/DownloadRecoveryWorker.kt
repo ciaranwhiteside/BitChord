@@ -31,6 +31,9 @@ class DownloadRecoveryWorker(
 
     override suspend fun doWork(): Result {
         if (!Downloads.hasPersistedJobs()) return Result.success()
+        // This process is already draining (or just asked to): nothing to
+        // recover, and no second foreground notification for an ordinary tap.
+        if (Downloads.serviceDrainingHere()) return Result.success()
         return runCatching {
             setForeground(foregroundInfo())
             ContextCompat.startForegroundService(

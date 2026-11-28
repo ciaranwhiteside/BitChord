@@ -225,6 +225,12 @@ class ModuleManager {
             }
             val request = Request.Builder().url(downloadUrl).build()
             val jsCode = Http.client.newCall(request).execute().use { resp ->
+                // The client follows redirects, so check where the code really
+                // came from: an https URL redirecting to http would otherwise
+                // load module code over plaintext.
+                if (!ModuleSandboxPolicy.allowsModuleDownload(resp.request.url.toString())) {
+                    throw Exception("Module ${module.id} redirected to an address that is not HTTPS")
+                }
                 if (!resp.isSuccessful) {
                     throw Exception("HTTP ${resp.code} downloading module ${module.id}")
                 }

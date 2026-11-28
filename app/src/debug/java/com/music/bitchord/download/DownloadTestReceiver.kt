@@ -69,6 +69,12 @@ class DownloadTestReceiver : BroadcastReceiver() {
         clearJournal(context)
         deleteTestState(context)
         val fixture = writeFixture(context)
+        // This runs on the developer's own debug install: remember their
+        // export setting before the test flips it, so CLEAN can put it back.
+        // Kept in its own file because the process is killed between SEED and
+        // CLEAN, and only the first SEED of a run records the original.
+        File(context.filesDir, SAVED_EXPORT).takeUnless { it.exists() }
+            ?.writeText(AppSettings.exportDownloads.value.toString())
         AppSettings.setExportDownloads(true)
 
         val initial = Properties().apply {
@@ -169,6 +175,10 @@ class DownloadTestReceiver : BroadcastReceiver() {
         removeMediaRows(context, DownloadStore.fileNameFor(testSong(), EXTENSION))
         clearJournal(context)
         deleteTestState(context)
+        File(context.filesDir, SAVED_EXPORT).takeIf { it.exists() }?.let { saved ->
+            saved.readText().trim().toBooleanStrictOrNull()?.let(AppSettings::setExportDownloads)
+            saved.delete()
+        }
     }
 
     private fun writeFixture(context: Context): File {
@@ -299,6 +309,7 @@ class DownloadTestReceiver : BroadcastReceiver() {
         private const val CONFIG = "download-test-fixture.properties"
         private const val PROGRESS = "download-process-death-progress.properties"
         private const val RESULT = "download-process-death-result.properties"
+        private const val SAVED_EXPORT = "download-test-saved-export.txt"
         private const val KEY_PENDING = "pending_download_jobs_v1"
         private const val RECOVERY_WORK = "download-recovery"
 
