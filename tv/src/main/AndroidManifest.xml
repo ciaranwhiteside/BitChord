@@ -327,6 +327,15 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- TV compiles the phone's download sources, DownloadRecoveryWorker
+             included: WorkManager promotes it before it starts the download
+             service, and Android 14+ requires the type on the library's
+             service as well (lint's SpecifyForegroundServiceType). -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
         <!--
           Home-screen widgets. Two providers so the picker lists a 2×2 and a 4×2,
           both of which are the same widget resized — see MediaWidget.
