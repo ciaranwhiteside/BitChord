@@ -444,6 +444,21 @@ object AppSettings {
     val equalizerPreset = MutableStateFlow(EqualizerPreset.FLAT)
 
     val playbackSpeed = MutableStateFlow(1.0f)
+
+    /** Karaoke is on. For this session only: it starts off at every launch. */
+    val karaokeEnabled = MutableStateFlow(false)
+
+    /** Karaoke's vocal level, 1 the original vocal and 0 as much out as the mask finds. */
+    val karaokeVocalLevel = MutableStateFlow(0.2f)
+
+    /**
+     * The track whose lyrics are timed word by word, as the lyrics view last found them, or
+     * null. Karaoke cuts only that track; any other plays as it is.
+     */
+    val karaokeSingableTrack = MutableStateFlow<String?>(null)
+
+    /** What Karaoke is doing, for the button; written by the playback service. */
+    val karaokeStatus = MutableStateFlow(com.music.bitchord.ui.player.KaraokeStatus.Off)
     val themeMode = MutableStateFlow(ThemeMode.DARK)
     val appFont = MutableStateFlow(AppFont.DEFAULT)
 
@@ -1096,6 +1111,7 @@ object AppSettings {
         equalizerBands.value = readEqualizerBands()
         equalizerPreset.value = EqualizerPreset.matching(equalizerBands.value)
         playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
+        karaokeVocalLevel.value = prefs.getFloat(KEY_KARAOKE_LEVEL, 0.2f).coerceIn(0f, 1f)
         themeMode.value = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
         }.getOrDefault(ThemeMode.DARK)
@@ -1519,6 +1535,12 @@ object AppSettings {
         return List(EqLayout.MANUAL_COUNT) {
             stored.getOrElse(it) { 0f }.coerceIn(-EqLayout.MANUAL_RANGE_DB, EqLayout.MANUAL_RANGE_DB)
         }
+    }
+
+    fun setKaraokeVocalLevel(value: Float) {
+        val clamped = value.coerceIn(0f, 1f)
+        karaokeVocalLevel.value = clamped
+        prefs.edit().putFloat(KEY_KARAOKE_LEVEL, clamped).apply()
     }
 
     fun setPlaybackSpeed(value: Float) {
@@ -2440,6 +2462,7 @@ object AppSettings {
     private const val KEY_EQ_BALANCE = "equalizer_balance"
     private const val KEY_EQ_BANDS = "equalizer_bands"
     private const val KEY_SPEED = "playback_speed"
+    private const val KEY_KARAOKE_LEVEL = "karaoke_vocal_level"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_APP_FONT = "app_font"
     private const val KEY_AUTOPLAY = "autoplay"

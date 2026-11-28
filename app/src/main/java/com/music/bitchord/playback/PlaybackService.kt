@@ -157,6 +157,7 @@ import com.music.bitchord.data.sources.StreamFormat
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.playback.smart.AutomixAnalysisSource
 import com.music.bitchord.playback.smart.VersionAudioAligner
+import com.music.bitchord.ui.player.KaraokeStatus
 import com.music.bitchord.ui.player.discardBlockedAutoMixAmbient
 import com.music.bitchord.ui.player.prefetchAutoMixArtwork
 import com.music.bitchord.widget.MediaWidget
@@ -176,6 +177,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import com.music.bitchord.playback.karaoke.KaraokeMasks
+import com.music.bitchord.playback.karaoke.TrackMasks
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -686,6 +689,11 @@ class PlaybackService : MediaLibraryService() {
      */
     private val loudnessA = LoudnessProcessor().apply { gainFor = ::loudnessGainFor }
     private val loudnessB = LoudnessProcessor().apply { gainFor = ::loudnessGainFor }
+    private val karaokeA = KaraokeProcessor()
+    private val karaokeB = KaraokeProcessor()
+    private val karaokeMasks by lazy { KaraokeMasks(this) }
+    private var karaokeTrack: TrackMasks? = null
+    private var karaokeSilentTicks = 0
     private var loudnessRetryJob: Job? = null
 
     /** The platform audio session currently advertised to system audio tools. */
@@ -712,6 +720,67 @@ class PlaybackService : MediaLibraryService() {
 
     private fun spareLoudness(): LoudnessProcessor =
         if (activeFilter === transitionFilterA) loudnessB else loudnessA
+
+    /** Karaoke's stage on the session player, by the same role as [activeLoudness]. */
+    private fun activeKaraoke(): KaraokeProcessor =
+        if (activeFilter === transitionFilterA) karaokeA else karaokeB
+
+    /**
+     * Points Karaoke at the session player's track and the next one. Only the session
+     * player's deck cuts: under Karaoke nothing is mixed, so the spare never plays.
+     *
+     * The cut stays in the chain for as long as Karaoke is on, and a track the lyrics view
+     * hasn't found word-timed lyrics for plays at level 1, which is the original exactly.
+     * Gliding the level rather than taking the stage out means lyrics found a second late
+     * don't move the audio.
+     */
+    private fun syncKaraoke() {
+        val exoPlayer = player ?: return
+        val on = AppSettings.karaokeEnabled.value
+        val active = activeKaraoke()
+        val spare = if (active === karaokeA) karaokeB else karaokeA
+        spare.enabled = false
+        spare.setSources(null, null)
+        active.enabled = on
+        if (!on) {
+            active.setSources(null, null)
+            karaokeTrack = null
+            karaokeMasks.stop()
+            return
+        }
+        val item = exoPlayer.currentMediaItem
+        val singable = item != null && item.mediaId == AppSettings.karaokeSingableTrack.value
+        active.level = if (singable) AppSettings.karaokeVocalLevel.value else 1f
+        val nextIndex = exoPlayer.nextMediaItemIndex
+        val next = if (nextIndex == C.INDEX_UNSET) null else exoPlayer.getMediaItemAt(nextIndex)
+        val (current, upcoming) = karaokeMasks.follow(
+            item?.karaokeItem(exoPlayer.duration),
+            next?.karaokeItem(C.TIME_UNSET),
+        )
+        karaokeTrack = current
+        active.setSources(current, upcoming)
+    }
+
+    private fun MediaItem.karaokeItem(durationMs: Long): KaraokeMasks.Item? {
+        val uri = localConfiguration?.uri ?: return null
+        val seconds = durationMs.takeIf { it != C.TIME_UNSET && it > 0 }?.div(1000.0) ?: 0.0
+        return KaraokeMasks.Item(mediaId, uri, seconds)
+    }
+
+    /** Tells the masks where the player is and the button what Karaoke is doing. */
+    private fun publishKaraoke() {
+        val exoPlayer = player ?: return
+        val track = karaokeTrack
+        track?.playheadAt(exoPlayer.currentPosition / 1000.0)
+        // A tick or two of grace: the stage only reports once audio has been through it.
+        karaokeSilentTicks = if (exoPlayer.isPlaying && !activeKaraoke().running) karaokeSilentTicks + 1 else 0
+        AppSettings.karaokeStatus.value = when {
+            track?.failed == true -> KaraokeStatus.Failed
+            karaokeSilentTicks > 2 -> KaraokeStatus.NotOnThisOutput
+            track?.ready == true && !karaokeMasks.awaitingModel -> KaraokeStatus.Singing
+            else -> KaraokeStatus.Preparing
+        }
+    }
 
     /** Automix's DSP analyzer — see [com.music.bitchord.playback.smart.TrackAnalyzer]. */
     private val trackAnalyzer = com.music.bitchord.playback.smart.TrackAnalyzer(this, AudioCache)
@@ -1285,6 +1354,7 @@ class PlaybackService : MediaLibraryService() {
             // session is currently pointed at.
             val exoPlayer = player ?: return
             checkQueueUndoValidity()
+            syncKaraoke()
             // Whether or not it is playing: a held video buffers until this answers.
             convertVideosAround(exoPlayer)
             if (exoPlayer.isPlaying) prefetchAround(exoPlayer)
@@ -1484,6 +1554,22 @@ class PlaybackService : MediaLibraryService() {
                 setForegroundServiceTimeoutMs(
                     if (onWatch) WATCH_SESSION_FOREGROUND_MS else DEFAULT_FOREGROUND_SERVICE_TIMEOUT_MS,
                 )
+            }
+        }
+        // Karaoke on and off, its slider, and the lyrics view's word on the track; while
+        // on, the masks are kept ahead of the playhead and the button told what is happening.
+        scope.launch {
+            combine(
+                AppSettings.karaokeEnabled,
+                AppSettings.karaokeVocalLevel,
+                AppSettings.karaokeSingableTrack,
+            ) { _, _, _ -> }.collectLatest {
+                syncKaraoke()
+                while (AppSettings.karaokeEnabled.value) {
+                    publishKaraoke()
+                    delay(KARAOKE_TICK_MS)
+                }
+                AppSettings.karaokeStatus.value = KaraokeStatus.Off
             }
         }
         // Signing in or out adds or removes Like everywhere at once.
@@ -1913,6 +1999,7 @@ class PlaybackService : MediaLibraryService() {
             equalizerProcessorA,
             transitionFilterA,
             loudnessA,
+            karaokeA,
             ownsSession = true,
         )
         val sparePlayer = buildPlayer(
@@ -1920,6 +2007,7 @@ class PlaybackService : MediaLibraryService() {
             equalizerProcessorB,
             transitionFilterB,
             loudnessB,
+            karaokeB,
             ownsSession = false,
         )
         player = exoPlayer
@@ -4200,9 +4288,10 @@ class PlaybackService : MediaLibraryService() {
         equalizer: EqualizerProcessor,
         filter: TransitionFilterProcessor,
         loudness: LoudnessProcessor,
+        karaoke: KaraokeProcessor,
         ownsSession: Boolean,
     ): ExoPlayer = ExoPlayer.Builder(this)
-        .setRenderersFactory(silenceSkippingRenderers(spatial, equalizer, filter, loudness))
+        .setRenderersFactory(silenceSkippingRenderers(spatial, equalizer, filter, loudness, karaoke))
         .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
         .setLoadControl(farBufferingLoadControl())
         .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
@@ -4383,6 +4472,7 @@ class PlaybackService : MediaLibraryService() {
         alreadyAudible: Boolean = false,
     ) {
         val exoPlayer = player ?: return
+        syncKaraoke()
         syncBoundedContextCursor(exoPlayer, mediaItem)
         if (boundedContextWindow != null && !ListenTogether.state.value.inParty) {
             saveBoundedContextSnapshot(exoPlayer)
@@ -7607,6 +7697,7 @@ class PlaybackService : MediaLibraryService() {
         equalizer: EqualizerProcessor,
         transition: TransitionFilterProcessor,
         loudness: LoudnessProcessor,
+        karaoke: KaraokeProcessor,
     ) = object : FfmpegFallbackRenderersFactory(this) {
         init {
             // Do not force PCM_FLOAT onto an OEM speaker mixer merely because
@@ -7687,7 +7778,7 @@ class PlaybackService : MediaLibraryService() {
             // them for the same reason: it belongs to the listener and
             // the whole session, while the transition filter belongs to
             // one handoff and has to have the last word on it.
-            val dspChain = DspChain(spatial, equalizer, transition, loudness)
+            val dspChain = DspChain(spatial, equalizer, transition, loudness, karaoke)
             val precision = PrecisionAudioSink(
                 delegate = defaultSink,
                 dspChain = dspChain,
@@ -7943,6 +8034,7 @@ class PlaybackService : MediaLibraryService() {
             equalizerProcessorA,
             transitionFilterA,
             loudnessA,
+            karaokeA,
             ownsSession = true,
         )
         val newSpare = buildPlayer(
@@ -7950,6 +8042,7 @@ class PlaybackService : MediaLibraryService() {
             equalizerProcessorB,
             transitionFilterB,
             loudnessB,
+            karaokeB,
             ownsSession = false,
         )
         player = newActive
@@ -10512,6 +10605,8 @@ class PlaybackService : MediaLibraryService() {
             .build()
 
     private companion object {
+        /** How often Karaoke's masks hear the playhead and its button its status. */
+        const val KARAOKE_TICK_MS = 250L
         const val MEDIA_ROOT_ID = "root"
         const val MEDIA_RECENTS_ID = "recents"
         const val MEDIA_QUICK_PICKS_ID = "quick_picks"

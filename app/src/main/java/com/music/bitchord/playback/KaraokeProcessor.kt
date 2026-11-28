@@ -46,6 +46,10 @@ class KaraokeProcessor {
     private var trackOffset = 0L
     private var scratch = FloatArray(0)
 
+    /** Whether the last block went through the cut (false on a mono stream, or one the chain never sees). */
+    @Volatile var running = false
+        private set
+
     /** How far behind the input the output runs; 0 while not cutting. */
     val latencyUs: Long
         get() = if (cut != null && sampleRate > 0) VocalCut.LATENCY * 1_000_000L / sampleRate else 0L
@@ -67,8 +71,10 @@ class KaraokeProcessor {
         val frames = block.frameCount
         if (!enabled || channels != 2 || sampleRate <= 0 || frames == 0) {
             cut = null
+            running = false
             return
         }
+        running = true
         val active = cut ?: VocalCut().also {
             cut = it
             fed = 0
@@ -101,6 +107,7 @@ class KaraokeProcessor {
 
     fun reset() {
         cut = null
+        running = false
         sampleRate = 0
         channels = 0
     }

@@ -975,6 +975,14 @@ class CrossfadeController(
     }
 
     /**
+     * Nothing is blended while this holds: in a party every member would start the next
+     * track at a moment of their own, and under Karaoke the cut runs on one deck only. Each
+     * side ends as a straight cut; the user's mix settings are left as they are.
+     */
+    private fun mixingHeld(): Boolean =
+        ListenTogether.state.value.inParty || AppSettings.karaokeEnabled.value
+
+    /**
      * Puts the Automix window on the seek bar for a track that is not playing.
      *
      * The marker comes out of the same plan that arms a transition, and that
@@ -993,7 +1001,7 @@ class CrossfadeController(
         val step = if (AppSettings.mixViewOpen.value) IDLE_STEP_MS else PAUSED_MARKER_STEP_MS
         if (now - pausedMarkerAt < step) return
         pausedMarkerAt = now
-        if (versionSwapActive() || ListenTogether.state.value.inParty) return
+        if (versionSwapActive() || mixingHeld()) return
         if (!player.hasNextMediaItem() || player.repeatMode == Player.REPEAT_MODE_ONE) return
         // A queue restored paused is not prepared yet, so the player has no
         // duration until play: the runtime the item was queued with stands in,
@@ -1043,7 +1051,7 @@ class CrossfadeController(
         // but a request made a tick before the party started would otherwise
         // run to completion: a whole-track decode and two model passes, spent
         // on a transition that cannot happen.
-        if (ListenTogether.state.value.inParty) {
+        if (mixingHeld()) {
             // Left behind by the last pair planned before the party started.
             // The marker describes a transition that is no longer going to
             // happen, and the flag a mix that is no longer running; both would
@@ -3004,7 +3012,7 @@ class CrossfadeController(
         val player = active()
         val item = player.currentMediaItem
         val text = when {
-            !AppSettings.smartFadeEnabled.value || item == null || ListenTogether.state.value.inParty -> null
+            !AppSettings.smartFadeEnabled.value || item == null || mixingHeld() -> null
             else -> describeAutomix(player, item)
         }
         if (AppSettings.automixDetail.value != text) AppSettings.automixDetail.value = text
@@ -3881,7 +3889,7 @@ class CrossfadeController(
         if (player !== active() ||
             player.currentMediaItemIndex != easeItemIndex ||
             position < easeNextAtMs - 2 * easeStepMs ||
-            ListenTogether.state.value.inParty
+            mixingHeld()
         ) {
             endEase()
             return
