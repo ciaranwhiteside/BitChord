@@ -48,7 +48,10 @@ fn google_sign_in_opens_in_the_sheet() {
 
 #[test]
 fn spotify_sign_in_opens_in_the_sheet() {
-    assert_sheet_catches(&quoted_after(&upstream("web/extension/entrypoints/background.ts"), "case 'spotify.signIn':"));
+    // The handlers are in background.ts, or in lib/dispatch.ts where the desktop branch shares them.
+    let dispatch = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/extension/lib/dispatch.ts");
+    let handlers = upstream("web/extension/entrypoints/background.ts") + &std::fs::read_to_string(dispatch).unwrap_or_default();
+    assert_sheet_catches(&quoted_after(&handlers, "case 'spotify.signIn':"));
 }
 
 #[test]
