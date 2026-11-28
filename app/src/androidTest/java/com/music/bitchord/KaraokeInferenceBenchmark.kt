@@ -23,10 +23,19 @@ import java.nio.ByteOrder
  * Karaoke's perf gate (SPEC.md, Checkpoint A): how fast the open-unmix mask runs on this
  * phone, and what the cut sounds like across window seams. Not part of the unit suite.
  *
- * Setup: Automix's models downloaded once in the app (Settings → Automix), and a song at
- * `/sdcard/Android/data/com.dev.bitchord/files/karaoke.m4a` (any format the phone decodes).
- * Writes `karaoke-20.wav` (vocal at 20%) and `karaoke-0.wav` next to it, and logs under
- * the tag `KaraokeBenchmark`.
+ * Setup: Automix's models downloaded once in the app (Settings → Automix), and a song of
+ * 45 s or more, in any format the phone decodes, in the app's private files: the app can't
+ * read a file adb puts in its external folder.
+ *
+ *     adb push song.mp3 /data/local/tmp/k
+ *     adb shell "cat /data/local/tmp/k | run-as com.dev.bitchord sh -c 'cat > files/karaoke.m4a'"
+ *     adb shell am instrument -w -e class com.music.bitchord.KaraokeInferenceBenchmark \
+ *         com.dev.bitchord.test/androidx.test.runner.AndroidJUnitRunner
+ *     adb exec-out run-as com.dev.bitchord cat files/karaoke-20.wav > karaoke-20.wav
+ *
+ * (`am instrument` rather than connectedAndroidTest, which uninstalls the app and its WAVs.)
+ * Writes `karaoke-20.wav` (vocal at 20%) and `karaoke-0.wav` next to the song, and logs
+ * under the tag `KaraokeBenchmark`.
  */
 @RunWith(AndroidJUnit4::class)
 class KaraokeInferenceBenchmark {
@@ -40,7 +49,7 @@ class KaraokeInferenceBenchmark {
         AutomixModels.install(context)
         val modelPath = runCatching { AutomixModels.path(AutomixModels.VOCALS) }.getOrNull()
         assertNotNull("Download Automix's models in the app first", modelPath)
-        val song = File(context.getExternalFilesDir(null), "karaoke.m4a")
+        val song = File(context.filesDir, "karaoke.m4a")
         assertTrue("Push a song to ${song.absolutePath}", song.exists())
 
         val started = System.currentTimeMillis()
