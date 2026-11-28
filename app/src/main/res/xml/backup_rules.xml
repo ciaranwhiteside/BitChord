@@ -13,12 +13,23 @@
     <exclude domain="sharedpref" path="bitchord_auth_plain.xml" />
     <exclude domain="sharedpref" path="bitchord_sources.xml" />
     <exclude domain="sharedpref" path="bitchord_sources_plain.xml" />
-    <!-- Tester code: a credential for this phone's owner (see AddonAuth). -->
+    <!-- Addon token and tester code: credentials for this phone's owner
+         (see AddonAuth). The *_secure files are the encrypted stores; the
+         unsuffixed names are the legacy plain files they migrate from and the
+         fallback when the Keystore is unusable. -->
     <exclude domain="sharedpref" path="bitchord_tester.xml" />
+    <exclude domain="sharedpref" path="bitchord_tester_secure.xml" />
+    <exclude domain="sharedpref" path="bitchord_addon_auth.xml" />
+    <exclude domain="sharedpref" path="bitchord_addon_auth_secure.xml" />
     <!-- Playback queues are local session state; do not resurrect them after reinstall. -->
     <exclude domain="sharedpref" path="bitchord_last_played.xml" />
     <exclude domain="sharedpref" path="bitchord_bounded_context.xml" />
     <exclude domain="sharedpref" path="bitchord_party_queue_stash.xml" />
+    <!-- Party pseudonym key (Keystore-bound) and party server/token/device
+         identity: session state, not backup data. -->
+    <exclude domain="sharedpref" path="bitchord_party_secret.xml" />
+    <exclude domain="sharedpref" path="bitchord_party_secret_plain.xml" />
+    <exclude domain="sharedpref" path="bitchord_listen_together.xml" />
     <!-- Drive backup: the account grant belongs to this phone (see DriveBackup). -->
     <exclude domain="sharedpref" path="bitchord_drive_backup.xml" />
     <!-- Other devices' listening and what this one last uploaded: Drive sync's, and re-fetched from Drive. -->

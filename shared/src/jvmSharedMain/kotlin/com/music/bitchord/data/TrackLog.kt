@@ -55,6 +55,29 @@ import kotlin.coroutines.CoroutineContext
  * Call [d], [w] and [e] exactly where `Log.d`/`w`/`e` would go; they forward
  * to logcat as well, so `adb logcat -s BitChord` is unchanged.
  */
+/**
+ * Copy Log is shared, pasted into issue reports and sent to maintainers.
+ * Signed media URLs and auth headers must not travel with it.
+ */
+internal fun redactSensitive(message: String): String {
+    var out = message
+    for (pattern in REDACTIONS) out = pattern.replace(out, "$1<redacted>")
+    return out
+}
+
+/**
+ * Compiled once: every TrackLog line runs through these, playback included.
+ * `lsig` is googlevideo's second signature; header values run to end of line.
+ */
+private val REDACTIONS = listOf(
+    Regex(
+        """(?i)([?&](?:access_token|token|sig|lsig|signature|api_?key|key|auth|proof|cookie|pot|session|secret|code|password)=)[^&\s]+""",
+    ),
+    Regex("""(?i)(authorization:\s*(?:bearer|token|basic)\s+)[^\s,]+"""),
+    Regex("""(?i)(x-bitchord-(?:token|proof):\s*)[^\s,]+"""),
+    Regex("""(?i)((?:set-)?cookie:\s*)[^\r\n]+"""),
+)
+
 object TrackLog {
     /**
      * Where each line is echoed as it is logged — logcat on the phone's debug
@@ -79,34 +102,48 @@ object TrackLog {
     // record(), which is what Copy Log actually depends on.
 
     fun d(tag: String, message: String, about: String? = working.get()) {
-        echo?.invoke('D', tag, message, null)
-        record('D', message, about)
+        val safe = redactSensitive(message)
+        echo?.invoke('D', tag, safe, null)
+        record('D', safe, about)
     }
 
     fun i(tag: String, message: String, about: String? = working.get()) {
-        echo?.invoke('I', tag, message, null)
-        record('I', message, about)
+        val safe = redactSensitive(message)
+        echo?.invoke('I', tag, safe, null)
+        record('I', safe, about)
     }
 
     fun w(tag: String, message: String, about: String? = working.get()) {
-        echo?.invoke('W', tag, message, null)
-        record('W', message, about)
+        val safe = redactSensitive(message)
+        echo?.invoke('W', tag, safe, null)
+        record('W', safe, about)
     }
 
     fun w(tag: String, message: String, error: Throwable, about: String? = working.get()) {
-        echo?.invoke('W', tag, message, error)
-        record('W', "$message\n${error.stackTraceToString()}", about)
+        val safe = redactSensitive(message)
+        echo?.invoke('W', tag, safe, error)
+        record('W', withTrace(message, error), about)
     }
 
     fun e(tag: String, message: String, about: String? = working.get()) {
-        echo?.invoke('E', tag, message, null)
-        record('E', message, about)
+        val safe = redactSensitive(message)
+        echo?.invoke('E', tag, safe, null)
+        record('E', safe, about)
     }
 
     fun e(tag: String, message: String, error: Throwable, about: String? = working.get()) {
-        echo?.invoke('E', tag, message, error)
-        record('E', "$message\n${error.stackTraceToString()}", about)
+        val safe = redactSensitive(message)
+        echo?.invoke('E', tag, safe, error)
+        record('E', withTrace(message, error), about)
     }
+
+    /**
+     * The line recorded for a message with an error: redacted as a whole,
+     * trace included — exception messages are where full signed URLs land
+     * (a data source's HTTP error carries the request URL).
+     */
+    internal fun withTrace(message: String, error: Throwable): String =
+        redactSensitive("$message\n${error.stackTraceToString()}")
 
     // ── Whose line is it ────────────────────────────────────────────────────
 

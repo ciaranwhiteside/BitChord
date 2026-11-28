@@ -11,27 +11,22 @@ interface LyricsSettings {
   disabled: LyricsSourceId[];
   /** Keep looking past a line-timed answer for a word-timed one (LyricsRepository.prioritizeSyllableSync). */
   preferSyllables: boolean;
-  /** PaxSenix's Spotify and Musixmatch routes need the user's own key. */
-  paxsenixKey: string;
   /** The BitChord mark on a shared lyrics card; someone who takes it off wants it off (AppSettings.lyricsCardLogo). */
   cardLogo: boolean;
   setEnabled: (id: LyricsSourceId, on: boolean) => void;
   move: (id: LyricsSourceId, by: -1 | 1) => void;
   setPreferSyllables: (on: boolean) => void;
-  setPaxsenixKey: (key: string) => void;
   setCardLogo: (on: boolean) => void;
   reset: () => void;
 }
 
 const KEY = 'bitchord:lyrics';
-type Saved = Pick<LyricsSettings, 'order' | 'disabled' | 'preferSyllables' | 'paxsenixKey' | 'cardLogo'>;
+type Saved = Pick<LyricsSettings, 'order' | 'disabled' | 'preferSyllables' | 'cardLogo'>;
 
 const DEFAULTS: Saved = {
   order: LYRICS_SOURCES.map((s) => s.id),
-  // The keyed routes do nothing without a key; off until one is entered.
-  disabled: ['paxsenix-spotify', 'paxsenix-musixmatch'],
+  disabled: [],
   preferSyllables: false,
-  paxsenixKey: '',
   cardLogo: true,
 };
 
@@ -47,8 +42,8 @@ function load(): Saved {
 export const useLyricsSettings = create<LyricsSettings>()((set, get) => {
   const save = (change: Partial<Saved>) => {
     set(change);
-    const { order, disabled, preferSyllables, paxsenixKey, cardLogo } = get();
-    localStorage.setItem(KEY, JSON.stringify({ order, disabled, preferSyllables, paxsenixKey, cardLogo }));
+    const { order, disabled, preferSyllables, cardLogo } = get();
+    localStorage.setItem(KEY, JSON.stringify({ order, disabled, preferSyllables, cardLogo }));
   };
   return {
     ...load(),
@@ -62,7 +57,6 @@ export const useLyricsSettings = create<LyricsSettings>()((set, get) => {
       save({ order });
     },
     setPreferSyllables: (preferSyllables) => save({ preferSyllables }),
-    setPaxsenixKey: (paxsenixKey) => save({ paxsenixKey: paxsenixKey.trim() }),
     setCardLogo: (cardLogo) => save({ cardLogo }),
     reset: () => save(DEFAULTS),
   };

@@ -378,55 +378,71 @@ class AddonClient(rawBaseUrl: String, private val pickedQuality: String? = null)
     private suspend fun body(url: String): String = withContext(Dispatchers.IO) {
         var attempt = 0
         var authRetries = 0
+        var redirects = 0
+        var currentUrl = url
+        var authAllowed = true
         var rejectedToken: String? = null
         while (true) {
             (quietUntilMs - System.currentTimeMillis()).takeIf { it > 0 }?.let { delay(it) }
 
-            val auth = if (authRequired) authHeaders(url, rejectedToken) else emptyMap()
-            val request = Request.Builder().url(url)
+            val auth = if (authRequired && authAllowed) authHeaders(currentUrl, rejectedToken) else emptyMap()
+            val request = Request.Builder().url(currentUrl)
                 .header("Accept", "application/json")
                 .header("User-Agent", USER_AGENT)
                 .apply { auth.forEach { (name, value) -> header(name, value) } }
                 .build()
 
+            var redirect: String? = null
             val wait = client.newCall(request).execute().use { response ->
-                val authChallenge = response.takeIf { it.code == 401 }
-                    ?.header("WWW-Authenticate")
-                    ?.takeIf { it.trimStart().startsWith("BitChord", ignoreCase = true) }
-                when {
-                    response.isSuccessful ->
-                        return@withContext response.body?.string()?.takeIf { it.isNotBlank() }
-                            ?: throw AddonException("Empty response")
-                    authChallenge != null -> {
-                        val code = AUTH_ERROR.find(authChallenge)?.groupValues?.get(1)
-                        when {
-                            authRetries >= 2 -> throw AddonException(AddonAuth.rejectionMessage(code))
-                            auth.isEmpty() -> authRequired = true
-                            code == "expired" || code == "invalid_token" -> rejectedToken = auth[AddonAuth.TOKEN_HEADER]
-                            else -> throw AddonException(AddonAuth.rejectionMessage(code))
+                if (response.code in 300..399) {
+                    // Followed by hand because OkHttp strips only Authorization;
+                    // the addon's token and proof are custom headers and would
+                    // otherwise be replayed to whatever host a redirect names.
+                    redirect = response.header("Location")
+                        ?.let { addonRedirectTarget(currentUrl, it) }
+                        ?: throw AddonException("Addon redirect without a usable Location")
+                    RETRY_NOW
+                } else {
+                    val authChallenge = response.takeIf { it.code == 401 }
+                        ?.header("WWW-Authenticate")
+                        ?.takeIf { it.trimStart().startsWith("BitChord", ignoreCase = true) }
+                    when {
+                        response.isSuccessful ->
+                            return@withContext response.body?.string()?.takeIf { it.isNotBlank() }
+                                ?: throw AddonException("Empty response")
+                        authChallenge != null -> {
+                            if (!authAllowed) {
+                                throw AddonException("Addon redirected to another host and asked for credentials")
+                            }
+                            val code = AUTH_ERROR.find(authChallenge)?.groupValues?.get(1)
+                            when {
+                                authRetries >= 2 -> throw AddonException(AddonAuth.rejectionMessage(code))
+                                auth.isEmpty() -> authRequired = true
+                                code == "expired" || code == "invalid_token" -> rejectedToken = auth[AddonAuth.TOKEN_HEADER]
+                                else -> throw AddonException(AddonAuth.rejectionMessage(code))
+                            }
+                            authRetries++
+                            RETRY_NOW
                         }
-                        authRetries++
-                        RETRY_NOW
+                        response.code == 404 -> throw AddonNotFound()
+                        response.code >= 500 -> throw AddonUnavailable("HTTP ${response.code}")
+                        response.code != 429 -> throw AddonException("HTTP ${response.code}")
+                        attempt >= MAX_RETRIES -> throw AddonUnavailable("This addon is rate limiting BitChord")
+                        else -> retryAfterMs(response.header("Retry-After"), attempt)
                     }
-                    response.code == 404 -> throw AddonNotFound()
-                    // A 5xx is a server having a bad minute and will be tried
-                    // again on the next track; a 4xx is this app asking for
-                    // something it will never be given — a wrong URL, a token
-                    // that has expired — and no amount of retrying fixes it.
-                    // The sources screen renders the two differently, and
-                    // painting a transient outage as a configuration error
-                    // sends people to re-paste a URL that was always correct.
-                    response.code >= 500 -> throw AddonUnavailable("HTTP ${response.code}")
-                    response.code != 429 -> throw AddonException("HTTP ${response.code}")
-                    attempt >= MAX_RETRIES -> throw AddonUnavailable("This addon is rate limiting BitChord")
-                    else -> retryAfterMs(response.header("Retry-After"), attempt)
                 }
+            }
+            redirect?.let { next ->
+                redirects++
+                if (redirects > MAX_REDIRECTS) throw AddonException("Addon redirected too many times")
+                authAllowed = authAllowed && addonAuthStillAllowed(currentUrl, next)
+                currentUrl = next
+                continue
             }
             if (wait == RETRY_NOW) continue
             quietUntilMs = System.currentTimeMillis() + wait
             attempt++
         }
-        // Unreachable: every path out of the loop returns or throws.
         @Suppress("UNREACHABLE_CODE")
         throw AddonException("unreachable")
     }
@@ -583,6 +599,7 @@ class AddonClient(rawBaseUrl: String, private val pickedQuality: String? = null)
         const val STREAM_TTL_MS = 5 * 60 * 1000L
 
         private const val MAX_RETRIES = 2
+        private const val MAX_REDIRECTS = 3
 
         /** [body]'s "send again now": an auth handshake, not back-pressure. */
         private const val RETRY_NOW = -1L
@@ -603,30 +620,47 @@ class AddonClient(rawBaseUrl: String, private val pickedQuality: String? = null)
         private const val PROBE_QUERY = "music"
 
         /**
-         * The shared client, with a ceiling on the whole call.
+         * The shared transport, with a ceiling on the whole call.
          *
-         * Derived from [Http.client] rather than built beside it, so the
-         * connection pool, dispatcher and DNS stay shared with the rest of the
-         * app. What is added is [OkHttpClient.Builder.callTimeout]: the base
-         * client bounds each *read*, which a server dribbling a byte at a time
-         * never trips, and an addon doing that would otherwise hold a
-         * source-resolution slot indefinitely. The spec asks addons to answer
-         * search in under five seconds and streams in under three; the ceiling
-         * is wider than that because a TorBox-backed addon cold-caching a long
-         * FLAC spends twenty to thirty seconds before it can answer at all —
-         * thirty-two was the worst a real Nebula addon took, and 35 s left no
-         * room once the call itself is added to the wait. The read timeout is
-         * lifted above the ceiling for the same reason: that wait is silence,
-         * not a slow trickle, so an inherited read timeout would fire first and
-         * the ceiling here would never be reached.
+         * Derived from [Http.transportClient] rather than [Http.client]: an
+         * addon server must never receive the saved WebDAV credential, even
+         * when its hostname happens to match the configured WebDAV server.
+         * The transport still shares the connection pool, dispatcher and DNS
+         * with the rest of the app. What is added is [OkHttpClient.Builder.callTimeout]:
+         * the base client bounds each *read*, which a server dribbling a byte
+         * at a time never trips, and an addon doing that would otherwise hold
+         * a source-resolution slot indefinitely. The spec asks addons to
+         * answer search in under five seconds and streams in under three; the
+         * ceiling is wider than that because a TorBox-backed addon cold-caching
+         * a long FLAC spends twenty to thirty seconds before it can answer at
+         * all — thirty-two was the worst a real Nebula addon took, and 35 s
+         * left no room once the call itself is added to the wait. The read
+         * timeout is lifted above the ceiling for the same reason: that wait
+         * is silence, not a slow trickle, so an inherited read timeout would
+         * fire first and the ceiling here would never be reached.
          */
-        private val client: OkHttpClient by lazy {
-            Http.client.newBuilder()
+        internal val client: OkHttpClient by lazy {
+            Http.transportClient.newBuilder()
+                .followRedirects(false)
+                .followSslRedirects(false)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .callTimeout(45, TimeUnit.SECONDS)
                 .build()
         }
     }
+}
+
+/** Resolve a redirect against the URL that produced it; null when unusable. */
+internal fun addonRedirectTarget(currentUrl: String, location: String): String? =
+    currentUrl.toHttpUrlOrNull()?.resolve(location)?.toString()
+
+/** Credentials may only follow a redirect that stays on the same host. */
+internal fun addonAuthStillAllowed(currentUrl: String, nextUrl: String): Boolean {
+    val current = currentUrl.toHttpUrlOrNull() ?: return false
+    val next = nextUrl.toHttpUrlOrNull() ?: return false
+    return current.scheme.equals(next.scheme, ignoreCase = true) &&
+        current.host.equals(next.host, ignoreCase = true) &&
+        current.port == next.port
 }
 
 /**

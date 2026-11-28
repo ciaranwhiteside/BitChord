@@ -96,39 +96,40 @@ class AddonPolicyTest {
     }
 
     @Test
-    fun `bluetooth qualifies only on ldac lhdc or aptx lossless`() {
+    fun `bluetooth qualifies on LDAC, LHDC, aptx lossless and samsung UHQ`() {
         val a2dp = setOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
-        for (codec in listOf("LDAC", "LHDC V5", "LHDC V3", "aptX Lossless")) {
-            val state = LosslessOutput.decide(a2dp, codec)
+        // High-bitrate codecs keep checkValidLossless addons available.
+        for (codec in listOf("aptX Lossless", "LDAC", "LHDC V5", "LHDC V3", "SSC UHQ", "Samsung UHQ")) {
+            val state = LosslessOutput.decide(a2dp, codec, 96_000, bluetoothActive = true)
             assertTrue(codec, state.capable)
-            assertEquals(LosslessOutput.Kind.BLUETOOTH, state.via)
+            assertEquals(codec, LosslessOutput.Kind.BLUETOOTH, state.via)
         }
         for (codec in listOf("SBC", "AAC", "aptX", "aptX HD", "aptX Adaptive", "LC3", "Opus")) {
-            val state = LosslessOutput.decide(a2dp, codec)
+            val state = LosslessOutput.decide(a2dp, codec, 96_000, bluetoothActive = true)
             assertFalse(codec, state.capable)
             assertEquals(codec, state.bluetoothCodec)
         }
     }
 
     @Test
-    fun `samsung qualifies only in uhq`() {
+    fun `samsung family names count only in UHQ territory`() {
         val a2dp = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
-        for (codec in listOf("SSC UHQ", "Samsung UHQ")) {
-            assertTrue(codec, LosslessOutput.decide(a2dp, codec, 48_000).capable)
-        }
-        // Named for the family only: the rate is what tells UHQ apart.
+        // Named for the family alone: UHQ is the only Samsung mode at 88.2 kHz+.
         for (codec in listOf("SSC", "Samsung Seamless Codec", "Samsung Scalable")) {
-            assertTrue(codec, LosslessOutput.decide(a2dp, codec, 96_000).capable)
-            assertFalse(codec, LosslessOutput.decide(a2dp, codec, 48_000).capable)
-            assertFalse(codec, LosslessOutput.decide(a2dp, codec, null).capable)
+            assertTrue(codec, LosslessOutput.decide(a2dp, codec, 96_000, bluetoothActive = true).capable)
+            assertFalse(codec, LosslessOutput.decide(a2dp, codec, 48_000, bluetoothActive = true).capable)
         }
         // A high rate alone proves nothing for anyone else's lossy codec.
-        assertFalse(LosslessOutput.decide(a2dp, "aptX Adaptive", 96_000).capable)
+        assertFalse(LosslessOutput.decide(a2dp, "aptX Adaptive", 96_000, bluetoothActive = true).capable)
     }
 
     @Test
     fun `an unnamed bluetooth codec is reported, not guessed`() {
-        val state = LosslessOutput.decide(setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP), null)
+        val state = LosslessOutput.decide(
+            setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP),
+            null,
+            bluetoothActive = true,
+        )
         assertFalse(state.capable)
         assertTrue(state.bluetoothCodecUnknown)
     }

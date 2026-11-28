@@ -1,7 +1,7 @@
 import type { DiscordPresenceOptions } from '@bitchord/shared/bridge';
 import { Activity, CircleUser, Film, Link, Lock, MicVocal, Music, Type } from 'lucide-react';
 import { SiApplemusic, SiDiscord, SiSpotify } from 'react-icons/si';
-import { APPLE_ORIGINS, useAppleAccess } from '@/data/apple/artistArt';
+import { useAppleAccess } from '@/data/apple/artistArt';
 import { useAppleSettings } from '@/data/apple/motionArt';
 import { useHostAccess } from '@/extension/useHostAccess';
 import { LYRIC_EXTENSION_ORIGINS } from '@/lyrics/http';
@@ -79,15 +79,13 @@ export function AnimatedArtworkToggle() {
 }
 
 /**
- * The lyric sources a page can't ask itself (KuGou, Musixmatch, Genius,
- * PaxSenix…), as in the Lyrics dialog. Apple's hosts are granted under Apple
- * Music, so they aren't asked for twice.
+ * The lyric sources a page can't ask itself (KuGou, Genius…), as in the Lyrics
+ * dialog.
  */
-const LYRIC_ONLY_ORIGINS = LYRIC_EXTENSION_ORIGINS.filter((o) => !APPLE_ORIGINS.includes(o));
 export function LyricSourcesAccess() {
-  const access = useHostAccess(LYRIC_ONLY_ORIGINS);
+  const access = useHostAccess(LYRIC_EXTENSION_ORIGINS);
   return (
-    <SettingsRow icon={Lock} title="Lyric Sources Access" keywords={['lyrics', 'permission', 'extension', 'musixmatch', 'kugou']}>
+    <SettingsRow icon={Lock} title="Lyric Sources Access" keywords={['lyrics', 'permission', 'extension', 'kugou', 'genius']}>
       <HostAccessValue {...access} />
     </SettingsRow>
   );

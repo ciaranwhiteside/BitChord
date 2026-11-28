@@ -37,7 +37,7 @@ export function AppearanceSettings() {
           icon={Languages}
           title="Lyric Sources"
           detail="Order, sources, syllable timing"
-          keywords={['lyrics', 'lrclib', 'musixmatch', 'synced', 'karaoke']}
+          keywords={['lyrics', 'lrclib', 'synced', 'karaoke']}
           onClick={() => setLyrics(true)}
         />
         <LyricSourcesAccess />
