@@ -17,6 +17,10 @@ const slider = [
   'absolute top-1/2 right-[var(--volume-gap,33px)] mx-0 mb-0 -mt-2 block h-4 w-24 cursor-pointer appearance-none bg-transparent',
   'pointer-events-none translate-x-2 opacity-0 transition-[opacity,translate]',
   'data-open:pointer-events-auto data-open:translate-none data-open:opacity-100',
+].join(' ');
+
+/** The level's track and thumb, filled to `--fill`; Karaoke's vocal slider wears it too. */
+export const rangeLook = [
   '[&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-[2px] [&::-webkit-slider-runnable-track]:bg-[linear-gradient(to_right,var(--systemPrimary)_var(--fill),var(--systemQuaternary)_var(--fill))]',
   '[&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-[2px] [&::-moz-range-track]:bg-[linear-gradient(to_right,var(--systemPrimary)_var(--fill),var(--systemQuaternary)_var(--fill))]',
   '[&::-webkit-slider-thumb]:-mt-1 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_0_2px_#0006]',
@@ -76,7 +80,7 @@ export function VolumeControl({ open, onOpen, className, iconSize = 20 }: Volume
   return (
     <span ref={wheelRef}>
       <input
-        className={slider}
+        className={`${slider} ${rangeLook}`}
         data-open={open || undefined}
         type="range"
         min={0}

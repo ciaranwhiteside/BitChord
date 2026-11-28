@@ -1,7 +1,7 @@
 // Registers <am-lyrics>.
 import '@uimaxbai/am-lyrics/am-lyrics.js';
 import { Check, ChevronDown, Loader2, Minus, Settings2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useCanvas } from '@/data/spotify/canvas';
 import { getBridge } from '@/extension/bridge';
 import { Menu, MenuHeader, MenuItem, MenuSeparator } from '@/components/Menu';
@@ -11,7 +11,11 @@ import type { SourceState } from '@/lyrics/repository';
 import { enabledSources } from '@/lyrics/settings';
 import { sourceById, type LyricsSourceId } from '@/lyrics/sources';
 import { useLyrics, useLyricsUi } from '@/lyrics/useLyrics';
+import { isWordSynced } from '@/lyrics/model';
+import { parseTtml } from '@/lyrics/parse';
+import { setKaraokeSingable, useKaraoke } from '@/playback/karaoke/store';
 import { getAudio, getPlayhead, usePlayer } from '@/state/player';
+import { KaraokeControl, KaraokeNote } from './KaraokeControl';
 import { LyricsSettings } from './LyricsSettings';
 
 type AmLyricsElement = HTMLElement & {
@@ -176,18 +180,20 @@ function LyricsView({ ttml, full }: { ttml: string; full: boolean }) {
       frame = requestAnimationFrame(tick);
       return () => cancelAnimationFrame(frame);
     }
-    const clock = new LyricClock(audio.currentTime * 1000);
+    // What is heard, in ms: Karaoke's cut holds the sound back a fixed amount (getPlayhead does the same).
+    const heardMs = () => Math.max(0, audio.currentTime - useKaraoke.getState().latencySec) * 1000;
+    const clock = new LyricClock(heardMs());
     let discontinuity = 0;
     let frame = 0;
     const tick = () => {
       const now = performance.now();
       // The reading and its stamp are taken together.
-      el.currentTime = clock.frame(now, Math.trunc(audio.currentTime * 1000), now, discontinuity);
+      el.currentTime = clock.frame(now, Math.trunc(heardMs()), now, discontinuity);
       frame = requestAnimationFrame(tick);
     };
     const hold = () => {
       cancelAnimationFrame(frame);
-      const ms = audio.currentTime * 1000;
+      const ms = heardMs();
       clock.hold(ms, performance.now());
       el.currentTime = ms;
     };
@@ -237,7 +243,7 @@ function useUngranted(): string[] {
 const NO_STATES: Partial<Record<LyricsSourceId, SourceState>> = {};
 
 /** The provider picker: which provider these lyrics are from, and the others' answers for this track. */
-function ProviderPicker({ current, full }: { current: LyricsSourceId | null; full: boolean }) {
+function ProviderPicker({ current, full, singable }: { current: LyricsSourceId | null; full: boolean; singable: boolean }) {
   const videoId = usePlayer((s) => s.nowPlaying?.videoId ?? '');
   const states = useLyricsUi((s) => s.states[videoId]) ?? NO_STATES;
   const picked = useLyricsUi((s) => s.picked[videoId]);
@@ -264,13 +270,16 @@ function ProviderPicker({ current, full }: { current: LyricsSourceId | null; ful
         <span>{label}</span>
         <ChevronDown size={14} />
       </button>
-      <button
-        className="grid size-7 place-items-center rounded-[8px] text-secondary hover:bg-quinary"
-        aria-label="Lyric settings"
-        onClick={() => setSettings(true)}
-      >
-        <Settings2 size={16} />
-      </button>
+      <div className="flex items-center gap-1">
+        <KaraokeControl singable={singable} />
+        <button
+          className="grid size-7 place-items-center rounded-[8px] text-secondary hover:bg-quinary"
+          aria-label="Lyric settings"
+          onClick={() => setSettings(true)}
+        >
+          <Settings2 size={16} />
+        </button>
+      </div>
       {anchor && (
         <Menu anchor={anchor} placement="below-end" onClose={close} label="Lyrics provider">
           <MenuItem checked={!picked} onSelect={() => (close(), pick(videoId, null))}>
@@ -387,6 +396,9 @@ export function LyricsPanel({ variant = 'panel' }: { variant?: 'panel' | 'full' 
   const fontReady = useLyricFont();
   const result = lyrics.data;
   const full = variant === 'full';
+  // Karaoke is offered, and cuts, only where the lyrics are timed word by word.
+  const singable = useMemo(() => !!result && parseTtml(result.ttml).some(isWordSynced), [result]);
+  useEffect(() => setKaraokeSingable(singable ? videoId : null), [singable, videoId]);
   const empty = full
     ? 'flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center type-title-3 text-secondary'
     : 'flex flex-1 flex-col items-center justify-center gap-2 px-6 pb-20 text-center type-[400_12px/16px] text-secondary';
@@ -395,7 +407,8 @@ export function LyricsPanel({ variant = 'panel' }: { variant?: 'panel' | 'full' 
   return (
     <div className={full ? `${panel} ${fullSizes}` : panel}>
       {canvas && variant === 'panel' && <CanvasBackdrop url={canvas} />}
-      <ProviderPicker current={result?.source ?? null} full={full} />
+      <ProviderPicker current={result?.source ?? null} full={full} singable={singable} />
+      <KaraokeNote singable={singable} />
       {/* Only worth raising when nothing was found: then the hosts behind the extension might have it. */}
       {ungranted.length > 0 && !result && !lyrics.isFetching && <PermissionNotice origins={ungranted} />}
       {!hasTrack ? (
