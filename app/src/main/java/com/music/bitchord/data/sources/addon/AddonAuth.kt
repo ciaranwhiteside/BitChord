@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import com.music.bitchord.BuildConfig
+import com.music.bitchord.auth.EncryptedPrefs
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.TrackLog
 import kotlinx.coroutines.CancellationException
@@ -109,8 +110,20 @@ object AddonAuth {
 
     /** Restores the last token, so a process restart doesn't cost a fresh attestation. */
     fun init(context: Context) {
-        testerPrefs = context.getSharedPreferences("bitchord_tester", Context.MODE_PRIVATE)
-        val p = context.getSharedPreferences("bitchord_addon_auth", Context.MODE_PRIVATE)
+        // Both stores hold credentials: a tester code is a long-lived account
+        // credential, and the token is a hardware-bound bearer. They go through
+        // the same Keystore-backed store as the YouTube cookie, with the legacy
+        // plain files migrated on first open.
+        //
+        // The encrypted stores need names of their own. The legacy plain files
+        // are "bitchord_tester" / "bitchord_addon_auth"; opened encrypted under
+        // those same names, the old plaintext entries read back as missing
+        // (users lose their tester code) and stay on disk in clear. Passed as
+        // the plain name instead, EncryptedPrefs moves them in, verifies the
+        // copy, deletes the plain file, and still falls back to that same file
+        // on a device whose Keystore is unusable.
+        testerPrefs = EncryptedPrefs.open(context, "bitchord_tester_secure", "bitchord_tester")
+        val p = EncryptedPrefs.open(context, "bitchord_addon_auth_secure", "bitchord_addon_auth")
         prefs = p
         val token = p.getString("token", null)
         val alias = p.getString("alias", null)

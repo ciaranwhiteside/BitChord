@@ -40,7 +40,18 @@ import com.music.bitchord.data.web.QuietWebChromeClient
  * app-scoped singletons — the WebView harvest below needs a [Context] and
  * none of the suspend call chain that reaches [accessToken] has one to hand.
  */
-internal object SpotifyToken {
+private val SPOTIFY_ORIGINS = listOf(
+    "https://open.spotify.com",
+    "https://accounts.spotify.com",
+)
+
+/** The canvas harvest may only run on Spotify's own player hosts. */
+internal fun isAllowedSpotifyWebUrl(url: String?): Boolean {
+    val host = runCatching { java.net.URI(url ?: return false).host?.lowercase() }.getOrNull() ?: return false
+    return host == "open.spotify.com" || host == "accounts.spotify.com" || host.endsWith(".spotify.com")
+}
+
+object SpotifyToken {
 
     private const val TAG = "SpotifyToken"
     private const val BRIDGE_NAME = "BitChordSpotifyTokenBridge"
@@ -145,8 +156,17 @@ internal object SpotifyToken {
         // /api/token request if a live one is already sitting there, leaving
         // the hook with nothing to see — wipe storage so every harvest forces
         // a real mint.
-        runCatching { WebStorage.getInstance().deleteAllData() }
+        // Only Spotify's own player storage is cleared; wiping every origin
+        // would sign the user out of unrelated WebView integrations.
+        runCatching {
+            val storage = WebStorage.getInstance()
+            SPOTIFY_ORIGINS.forEach { storage.deleteOrigin(it) }
+        }
 
+        // Written by the WebView client on the UI thread, read by the bridge on
+        // WebView's JavaBridge thread: an AtomicReference, so the origin check
+        // never sees a stale URL.
+        val pageUrl = java.util.concurrent.atomic.AtomicReference<String?>(null)
         var webView: WebView? = null
         return try {
             webView = WebView(context).apply {
@@ -154,17 +174,22 @@ internal object SpotifyToken {
                 settings.domStorageEnabled = true
                 settings.userAgentString = CANVAS_UA
                 cookieManager.setAcceptThirdPartyCookies(this, true)
-                addJavascriptInterface(TokenBridge(deferred), BRIDGE_NAME)
+                addJavascriptInterface(TokenBridge(deferred) { pageUrl.get() }, BRIDGE_NAME)
                 webChromeClient = QuietWebChromeClient()
 
                 webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
+                        !isAllowedSpotifyWebUrl(url)
+
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
+                        pageUrl.set(url)
                         view.evaluateJavascript(HOOK_SCRIPT, null)
                     }
 
                     override fun onPageFinished(view: WebView, url: String?) {
                         super.onPageFinished(view, url)
+                        pageUrl.set(url)
                         // Re-assert in case the player navigated client-side
                         // after the onPageStarted injection ran.
                         view.evaluateJavascript(HOOK_SCRIPT, null)
@@ -187,10 +212,16 @@ internal object SpotifyToken {
     }
 
     /** Receives raw `/api/token` response bodies from the hooked page. */
-    private class TokenBridge(private val deferred: CompletableDeferred<HarvestedToken?>) {
+    private class TokenBridge(
+        private val deferred: CompletableDeferred<HarvestedToken?>,
+        private val pageUrl: () -> String?,
+    ) {
         @JavascriptInterface
         fun onTokenPayload(payload: String?) {
             if (payload.isNullOrBlank() || deferred.isCompleted) return
+            // A page that navigated off Spotify must not be able to feed the
+            // bridge a token, even if it can reach the injected interface.
+            if (!isAllowedSpotifyWebUrl(pageUrl())) return
             runCatching {
                 val root = json.parseToJsonElement(payload).jsonObject
                 val token = root["accessToken"]?.jsonPrimitive?.contentOrNull
